@@ -44,6 +44,7 @@ class TakScene(Scene):
         # Level
         self.board = None
         self.board_blocks = []
+        self.board_labels = []
         self.flats = []
         self.table = None
 
@@ -135,7 +136,7 @@ class TakScene(Scene):
         )
 
         # Setup orbit camera (centered on board at 4, 4)
-        self.orbit_cam = OrbitCamera(self.engine, target=(4, 4, 0), distance=15.0)
+        self.orbit_cam = OrbitCamera(self.engine, target=(4, 4, 0), distance=14.0)
 
         # Set initial camera based on mode
         if self.camera_mode == self.camera_orbit_mode:
@@ -145,10 +146,28 @@ class TakScene(Scene):
         self.engine.input_handler.set_mouse_locked(locked=False)
 
     def setup_level(self):
+        # Create table
+        self.table = Table(self.engine,width=30,length=14, x=4, y=4, z=-0.5)
+
         # Create Board
         self.board = Board(self.engine, size=5)
 
-        # Index Board Blocks
+        # Index Board Blocks - flat labels on each position
+        if self.debug:
+            self.board_labels = []
+            for y in range(5):
+                for x in range(5):
+                    index = y * 5 + x
+                    label_text = chr(ord("A") + index)
+                    text = TextNode(f"board_label_{label_text}")
+                    text.setText(label_text)
+                    text.setTextColor(0, 0, 0, 1)
+                    text_node = base.render.attachNewNode(text)
+                    text_node.setScale(0.5)
+                    text_node.setPos((x * 2) - 0.2, (y * 2) - 0.2, 0.3)
+                    text_node.setP(-90)  # Lay flat (facing down toward camera)
+                    text_node.flattenLight()
+                    self.board_labels.append(text_node)
 
         # Create stack handler
         self.stack_handler = StackHandler(self.engine)
@@ -173,9 +192,6 @@ class TakScene(Scene):
         stack.push(self.engine, Flat.BLACK)
         stack.push(self.engine, Flat.BLACK)
         self.stack_handler.add_stack(stack)
-
-        # Create table beneath the board
-        self.table = Table(self.engine, x=4, y=4, z=-0.5)
 
     def handle_input(self, input_handler):
         super().handle_input(input_handler)
@@ -244,6 +260,9 @@ class TakScene(Scene):
         if not self.engine.scene_handler.console.is_open:
             if self.camera_mode == self.camera_orbit_mode:
                 self.orbit_cam.update(dt)
+
+                # Print out camera yaw and pitch
+                # print(f"Camera Yaw: {self.orbit_cam.yaw} -- Camera Pitch: {self.orbit_cam.pitch}")
             else:
                 self.free_cam.update(dt)
 
@@ -259,6 +278,8 @@ class TakScene(Scene):
             block.destroy()
         for flat in self.flats:
             flat.destroy()
+        for label in self.board_labels:
+            label.removeNode()
         if self.table:
             self.table.destroy()
         if self.free_cam:

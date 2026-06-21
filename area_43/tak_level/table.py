@@ -6,14 +6,14 @@ from panda3d.core import Geom, GeomTriangles, GeomNode
 class Table:
     WOOD = (0.6, 0.4, 0.2, 1.0)
 
-    def __init__(self, engine, x=0, y=0, z=0):
+    def __init__(self, engine,width=12, length=12, x=0, y=0, z=0):
         self.engine = engine
         self.position = (x, y, z)
         self.mesh = MeshObject(engine, "Table")
         self.mesh_node = None
-        self._build_mesh()
+        self._build_mesh(width,length)
 
-    def _build_mesh(self):
+    def _build_mesh(self, width=12, length=12):
         if self.mesh_node:
             self.mesh_node.removeNode()
 
@@ -28,7 +28,7 @@ class Table:
         vertex_index = 0
 
         # Table dimensions
-        w, h, l = 12.0, 1.0, 12.0
+        w, h, l = width, 1.0, length
         hw, hh, hl = w / 2, h / 2, l / 2
         ox, oy, oz = self.position
 

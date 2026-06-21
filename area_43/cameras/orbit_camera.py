@@ -13,12 +13,12 @@ class OrbitCamera(Camera):
         engine,
         target=(0, 0, 0),
         distance=5.0,
-        yaw=45.0,
-        pitch=30.0,
+        yaw=180.0,
+        pitch=40.0,
         sensitivity=50,
         min_distance=0.5,
         max_distance=100.0,
-        min_pitch=-89,
+        min_pitch=10, # Default 89
         max_pitch=89,
         zoom_speed=0.1,
         pan_speed=0.5,
@@ -45,12 +45,12 @@ class OrbitCamera(Camera):
         self.zoom_speed = zoom_speed
         self.pan_speed = pan_speed
 
-        self._orbiting = False
-        self._panning = False
-        self._input = None
+        self.orbiting = False
+        self.panning = False
+        self.input = None
 
         # Scroll wheel state
-        self._scroll_delta = 0
+        self.scroll_delta = 0
 
         # Register scroll wheel events
         base.accept("wheel_up", self.on_scroll_up)
@@ -66,11 +66,11 @@ class OrbitCamera(Camera):
 
     def on_scroll_up(self):
         """Handle scroll wheel up (zoom in)"""
-        self._scroll_delta = -1
+        self.scroll_delta = -1
 
     def on_scroll_down(self):
         """Handle scroll wheel down (zoom out)"""
-        self._scroll_delta = 1
+        self.scroll_delta = 1
 
     def update_position(self):
         """Calculate camera position from orbit parameters"""
@@ -95,17 +95,17 @@ class OrbitCamera(Camera):
         if not self.active:
             return
 
-        self._input = input_handler
+        self.input = input_handler
 
         shift_held = input_handler.is_key_pressed("shift")
         middle_mouse = input_handler.is_mouse_pressed(2)
 
         # Middle mouse + Shift = Pan
         if middle_mouse and shift_held:
-            if not self._panning:
+            if not self.panning:
                 input_handler.set_mouse_locked(True)
-                self._panning = True
-                self._orbiting = False
+                self.panning = True
+                self.orbiting = False
 
             dx, dy = input_handler.mouse_delta
             if dx != 0 or dy != 0:
@@ -134,10 +134,10 @@ class OrbitCamera(Camera):
 
         # Middle mouse (no shift) = Orbit
         elif middle_mouse and not shift_held:
-            if not self._orbiting:
+            if not self.orbiting:
                 input_handler.set_mouse_locked(True)
-                self._orbiting = True
-                self._panning = False
+                self.orbiting = True
+                self.panning = False
 
             dx, dy = input_handler.mouse_delta
             if dx != 0 or dy != 0:
@@ -149,10 +149,10 @@ class OrbitCamera(Camera):
 
         # Release mouse lock when middle mouse released
         else:
-            if self._orbiting or self._panning:
+            if self.orbiting or self.panning:
                 input_handler.set_mouse_locked(False)
-                self._orbiting = False
-                self._panning = False
+                self.orbiting = False
+                self.panning = False
 
     def update(self, dt, imgui_wants_mouse=False):
         """Update camera - handle scroll zoom"""
@@ -160,8 +160,8 @@ class OrbitCamera(Camera):
             return
 
         # Handle scroll wheel zoom (only if UI doesn't want mouse)
-        if self._scroll_delta != 0 and not imgui_wants_mouse:
-            zoom_factor = 1 + self._scroll_delta * self.zoom_speed
+        if self.scroll_delta != 0 and not imgui_wants_mouse:
+            zoom_factor = 1 + self.scroll_delta * self.zoom_speed
             self.distance *= zoom_factor
             self.distance = max(
                 self.min_distance, min(self.max_distance, self.distance)
@@ -169,7 +169,7 @@ class OrbitCamera(Camera):
             self.update_position()
 
         # Always reset scroll delta
-        self._scroll_delta = 0
+        self.scroll_delta = 0
 
     def zoom(self, amount):
         """Zoom in/out by amount (positive = zoom out)"""
