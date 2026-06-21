@@ -1,13 +1,15 @@
 from direct.showbase.ShowBase import ShowBase
-
+from panda3d.core import WindowProperties, Point3, Point2, TextNode
 from area_43.cameras.free_flying_camera import FreeFlyingCamera
-from area_43.cameras.orbit_camera import OrbitCamera
 from area_43.tak_level.board import Board
+from area_43.tak_level.board_block import BoardBlock
 from area_43.tak_level.flat import Flat
+from area_43.tak_level.table import Table
 from area_43.tak_level.stack import Stack
 from area_43.tak_level.stack_handler import StackHandler
-from area_43.tak_level.table import Table
+from area_43.cameras.orbit_camera import OrbitCamera
 from engine.light import AmbientLight, DirectionalLight
+from engine.renderer import Renderer
 from engine.scene import Scene
 from engine.skybox import Skybox
 
@@ -19,7 +21,7 @@ class TakScene(Scene):
         super().__init__(engine, "tak_scene")
 
         # Debugging Mode
-        #self.engine.debug_enabled = True
+        # self.engine.debug_enabled = True
         self.debug = True
 
         # Disable Grid
@@ -146,8 +148,7 @@ class TakScene(Scene):
         # Create Board
         self.board = Board(self.engine, size=5)
 
-        # Number Board Blocks
-        
+        # Index Board Blocks
 
         # Create stack handler
         self.stack_handler = StackHandler(self.engine)
