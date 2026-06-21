@@ -1,25 +1,27 @@
 from engine.mesh_object import MeshObject
-from engine.geometry import make_box_node_uv, make_wire_box_node
+from engine.geometry import make_pyramid_node, make_wire_box_node
+from area_43.tak_level.flat import Flat
 from panda3d.bullet import BulletBoxShape, BulletRigidBodyNode
 
 
-class Flat:
-    BLACK = (0.1, 0.1, 0.1, 1.0)
-    WHITE = (0.9, 0.9, 0.9, 1.0)
-    WIDTH = 1.5
-    HEIGHT = 0.5
-    LENGTH = 1.5
+class Capstone:
+    # Player 1 (BLACK) -> gold, Player 2 (WHITE) -> silver
+    GOLD = (0.83, 0.69, 0.22, 1.0)
+    SILVER = (0.75, 0.75, 0.78, 1.0)
+    WIDTH = 1.0
+    HEIGHT = 0.9
+    LENGTH = 1.0
 
-    OUTLINE = (0.5, 0.5, 0.5, 1.0)    # medium grey edge, idle
-    HIGHLIGHT = (1.0, 1.0, 0.0, 1.0)  # yellow when selecting/building a selection
+    BOARD_TOP = 0.25  # board surface height (where a layer-0 piece rests)
 
-    def __init__(self, engine, color=WHITE, x=0, y=0, layer_index=0):
+    def __init__(self, engine, color=GOLD, x=0, y=0, layer_index=0):
         self.engine = engine
         self.color = color
         self.layer_index = layer_index
-        z = (layer_index + 1) * Flat.HEIGHT
+        bottom = Capstone.BOARD_TOP + layer_index * Flat.HEIGHT
+        z = bottom + Capstone.HEIGHT / 2
         self.position = (x, y, z)
-        self.mesh = MeshObject(engine, "Flat")
+        self.mesh = MeshObject(engine, "Capstone")
         self.mesh_node = None
         self.outline_np = None
         self._highlighted = False
@@ -34,32 +36,36 @@ class Flat:
         if self.outline_np:
             self.outline_np.removeNode()
 
-        node = make_box_node_uv(
-            Flat.WIDTH, Flat.HEIGHT, Flat.LENGTH, self.position, "flat",
+        node = make_pyramid_node(
+            Capstone.WIDTH, Capstone.HEIGHT, Capstone.LENGTH,
+            self.color, self.position, "capstone",
         )
         self.mesh_node = self.mesh.node.attachNewNode(node)
-        from area_43.tak_level.piece_texture import texture_for
-        self.mesh_node.setTexture(texture_for(self.engine, self.color))
 
+        # Pyramid has no grey edge rect; outline only appears (yellow) on highlight.
         outline = make_wire_box_node(
-            Flat.WIDTH, Flat.HEIGHT, Flat.LENGTH,
-            position=self.position, name="flat_outline",
+            Capstone.WIDTH, Capstone.HEIGHT, Capstone.LENGTH,
+            color=Flat.HIGHLIGHT, position=self.position, name="capstone_outline",
         )
         self.outline_np = self.mesh.node.attachNewNode(outline)
         self.set_highlight(self._highlighted)
 
     def set_highlight(self, on):
         self._highlighted = on
-        if self.outline_np:
-            self.outline_np.setColor(*(Flat.HIGHLIGHT if on else Flat.OUTLINE), 1)
+        if not self.outline_np:
+            return
+        if on:
+            self.outline_np.show()
+        else:
+            self.outline_np.hide()
 
     def _create_collision(self):
         if self.body:
             self.engine.physics.removeRigidBody(self.body)
             self.body_np.removeNode()
 
-        shape = BulletBoxShape((Flat.WIDTH / 2, Flat.LENGTH / 2, Flat.HEIGHT / 2))
-        self.body = BulletRigidBodyNode("flat_collision")
+        shape = BulletBoxShape((Capstone.WIDTH / 2, Capstone.LENGTH / 2, Capstone.HEIGHT / 2))
+        self.body = BulletRigidBodyNode("capstone_collision")
         self.body.addShape(shape)
         self.body_np = self.engine.render.attachNewNode(self.body)
         self.body_np.setPos(*self.position)

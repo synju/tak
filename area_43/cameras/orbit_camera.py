@@ -14,12 +14,12 @@ class OrbitCamera(Camera):
         target=(0, 0, 0),
         distance=5.0,
         yaw=180.0,
-        pitch=40.0,
+        pitch=25.0,
         sensitivity=50,
         #min_distance=0.5,
         min_distance=9,
         #max_distance=100.0,
-        max_distance=14.0,
+        max_distance=15.0,
         min_pitch=10, # Default -89
         max_pitch=75, # Default 89
         zoom_speed=0.1,
@@ -53,6 +53,13 @@ class OrbitCamera(Camera):
 
         # Scroll wheel state
         self.scroll_delta = 0
+
+        # Turn-switch yaw animation
+        self.animating = False
+        self._anim_from_yaw = 0.0
+        self._anim_to_yaw = 0.0
+        self._anim_elapsed = 0.0
+        self._anim_duration = 1.0
 
         # Register scroll wheel events
         base.accept("wheel_up", self.on_scroll_up)
@@ -92,9 +99,20 @@ class OrbitCamera(Camera):
             base.camera.setPos(x, y, z)
             base.camera.lookAt(self.target[0], self.target[1], self.target[2])
 
+    def rotate_by(self, delta_yaw, duration=1.0):
+        """Smoothly rotate yaw by delta_yaw degrees over duration seconds."""
+        self._anim_from_yaw = self.yaw
+        self._anim_to_yaw = self.yaw + delta_yaw
+        self._anim_elapsed = 0.0
+        self._anim_duration = max(0.01, duration)
+        self.animating = True
+
+    def is_animating(self):
+        return self.animating
+
     def handle_input(self, input_handler):
         """Handle mouse input for orbiting, panning, and zooming"""
-        if not self.active:
+        if not self.active or self.animating:
             return
 
         self.input = input_handler
@@ -160,6 +178,16 @@ class OrbitCamera(Camera):
         """Update camera - handle scroll zoom"""
         if not self.active:
             return
+
+        # Turn-switch yaw animation (smoothstep ease)
+        if self.animating:
+            self._anim_elapsed += dt
+            t = min(1.0, self._anim_elapsed / self._anim_duration)
+            s = t * t * (3 - 2 * t)
+            self.yaw = self._anim_from_yaw + (self._anim_to_yaw - self._anim_from_yaw) * s
+            self.update_position()
+            if t >= 1.0:
+                self.animating = False
 
         # Handle scroll wheel zoom (only if UI doesn't want mouse)
         if self.scroll_delta != 0 and not imgui_wants_mouse:

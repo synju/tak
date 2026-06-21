@@ -1,25 +1,28 @@
 from engine.mesh_object import MeshObject
 from engine.geometry import make_box_node_uv, make_wire_box_node
+from area_43.tak_level.flat import Flat
 from panda3d.bullet import BulletBoxShape, BulletRigidBodyNode
 
 
-class Flat:
+class Wall:
     BLACK = (0.1, 0.1, 0.1, 1.0)
     WHITE = (0.9, 0.9, 0.9, 1.0)
-    WIDTH = 1.5
-    HEIGHT = 0.5
-    LENGTH = 1.5
+    # Same stone as a Flat, stood up on its edge: a 1.5 face goes vertical,
+    # the 0.5 thickness becomes the depth.
+    WIDTH = Flat.WIDTH    # 1.5
+    HEIGHT = Flat.LENGTH  # 1.5 -> now vertical
+    LENGTH = Flat.HEIGHT  # 0.5 -> thin depth
 
-    OUTLINE = (0.5, 0.5, 0.5, 1.0)    # medium grey edge, idle
-    HIGHLIGHT = (1.0, 1.0, 0.0, 1.0)  # yellow when selecting/building a selection
+    BOARD_TOP = 0.25  # board surface height (where a layer-0 piece rests)
 
-    def __init__(self, engine, color=WHITE, x=0, y=0, layer_index=0):
+    def __init__(self, engine, color=BLACK, x=0, y=0, layer_index=0):
         self.engine = engine
         self.color = color
         self.layer_index = layer_index
-        z = (layer_index + 1) * Flat.HEIGHT
+        bottom = Wall.BOARD_TOP + layer_index * Flat.HEIGHT
+        z = bottom + Wall.HEIGHT / 2
         self.position = (x, y, z)
-        self.mesh = MeshObject(engine, "Flat")
+        self.mesh = MeshObject(engine, "Wall")
         self.mesh_node = None
         self.outline_np = None
         self._highlighted = False
@@ -35,15 +38,15 @@ class Flat:
             self.outline_np.removeNode()
 
         node = make_box_node_uv(
-            Flat.WIDTH, Flat.HEIGHT, Flat.LENGTH, self.position, "flat",
+            Wall.WIDTH, Wall.HEIGHT, Wall.LENGTH, self.position, "wall",
         )
         self.mesh_node = self.mesh.node.attachNewNode(node)
         from area_43.tak_level.piece_texture import texture_for
         self.mesh_node.setTexture(texture_for(self.engine, self.color))
 
         outline = make_wire_box_node(
-            Flat.WIDTH, Flat.HEIGHT, Flat.LENGTH,
-            position=self.position, name="flat_outline",
+            Wall.WIDTH, Wall.HEIGHT, Wall.LENGTH,
+            position=self.position, name="wall_outline",
         )
         self.outline_np = self.mesh.node.attachNewNode(outline)
         self.set_highlight(self._highlighted)
@@ -58,8 +61,8 @@ class Flat:
             self.engine.physics.removeRigidBody(self.body)
             self.body_np.removeNode()
 
-        shape = BulletBoxShape((Flat.WIDTH / 2, Flat.LENGTH / 2, Flat.HEIGHT / 2))
-        self.body = BulletRigidBodyNode("flat_collision")
+        shape = BulletBoxShape((Wall.WIDTH / 2, Wall.LENGTH / 2, Wall.HEIGHT / 2))
+        self.body = BulletRigidBodyNode("wall_collision")
         self.body.addShape(shape)
         self.body_np = self.engine.render.attachNewNode(self.body)
         self.body_np.setPos(*self.position)

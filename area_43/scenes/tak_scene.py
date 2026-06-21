@@ -3,10 +3,15 @@ from panda3d.core import WindowProperties, Point3, Point2, TextNode
 from area_43.cameras.free_flying_camera import FreeFlyingCamera
 from area_43.tak_level.board import Board
 from area_43.tak_level.board_block import BoardBlock
+from area_43.tak_level.reserve import Reserve
 from area_43.tak_level.flat import Flat
+from area_43.tak_level.capstone import Capstone
 from area_43.tak_level.table import Table
-from area_43.tak_level.stack import Stack
 from area_43.tak_level.stack_handler import StackHandler
+from area_43.tak_level.placement_handler import PlacementHandler
+from area_43.tak_level.win_resolver import check_win
+from area_43.tak_level.win_panel import WinPanel
+from area_43.tak_level.start_menu import StartMenu
 from area_43.cameras.orbit_camera import OrbitCamera
 from engine.light import AmbientLight, DirectionalLight
 from engine.renderer import Renderer
@@ -43,13 +48,25 @@ class TakScene(Scene):
 
         # Level
         self.board = None
-        self.board_blocks = []
         self.board_labels = []
-        self.flats = []
+        self.reserves = []
         self.table = None
 
         # Stack handler
         self.stack_handler = None
+
+        # Placement handler
+        self.placement_handler = None
+
+        # Turn state (0 = Player 1 / black, 1 = Player 2 / white)
+        self.current_player = 0
+
+        # Win state
+        self.win_panel = None
+        self.game_over = False
+
+        # Start menu
+        self.start_menu = None
 
         # Mouse Boolean
         self.right_mouse_down = False
@@ -74,12 +91,12 @@ class TakScene(Scene):
         # Cameras
         self.setup_cameras()
 
-        # Level
-        self.setup_level()
-
         # Scroll wheel for stack selection
         base.accept("wheel_up", self.on_scroll_up)
         base.accept("wheel_down", self.on_scroll_down)
+
+        # Start menu (the level is built when PLAY is clicked)
+        self.show_start_menu()
 
     def setup_skybox(self):
         self.skybox = Skybox(
@@ -136,7 +153,7 @@ class TakScene(Scene):
         )
 
         # Setup orbit camera (centered on board at 4, 4)
-        self.orbit_cam = OrbitCamera(self.engine, target=(4, 4, 0), distance=14.0)
+        self.orbit_cam = OrbitCamera(self.engine, target=(4, 4, 0), distance=15.0)
 
         # Set initial camera based on mode
         if self.camera_mode == self.camera_orbit_mode:
@@ -147,7 +164,7 @@ class TakScene(Scene):
 
     def setup_level(self):
         # Create table
-        self.table = Table(self.engine,width=30,length=14, x=4, y=4, z=-0.5)
+        self.table = Table(self.engine,width=30,length=20, x=4, y=4, z=-0.5)
 
         # Create Board
         self.board = Board(self.engine, size=5)
@@ -164,7 +181,8 @@ class TakScene(Scene):
                     text.setTextColor(0, 0, 0, 1)
                     text_node = base.render.attachNewNode(text)
                     text_node.setScale(0.5)
-                    text_node.setPos((x * 2) - 0.2, (y * 2) - 0.2, 0.3)
+                    wx, wy = BoardBlock.board_to_world(x, y)
+                    text_node.setPos(wx - 0.2, wy - 0.2, 0.3)
                     text_node.setP(-90)  # Lay flat (facing down toward camera)
                     text_node.flattenLight()
                     self.board_labels.append(text_node)
@@ -173,31 +191,39 @@ class TakScene(Scene):
         self.stack_handler = StackHandler(self.engine)
         self.stack_handler.set_orbit_camera(self.orbit_cam)
 
-        # Create a stack of 4 flats on top of first board block
-        layer_index = 0
-        colors = [Flat.BLACK, Flat.WHITE]
-        for color in colors:
-            flat = Flat(self.engine, color, x=0, y=0, layer_index=layer_index)
-            self.flats.append(flat)
-            layer_index += 1
+        # Player reserves on the table, in a row in front of each player.
+        # The lone front-row stone is the OPPONENT's colour (Tak opening swap):
+        # each player's first move places that odd piece.
+        # Player 1 (BLACK stones, gold capstone) near edge (-y), odd piece white,
+        # board is toward +y
+        self.reserves.append(
+            Reserve(self.engine, Flat.BLACK, Capstone.GOLD, Flat.WHITE,
+                    center_x=4, center_y=-3, board_dir=1)
+        )
+        # Player 2 (WHITE stones, silver capstone) far edge (+y), odd piece black,
+        # board is toward -y
+        self.reserves.append(
+            Reserve(self.engine, Flat.WHITE, Capstone.SILVER, Flat.BLACK,
+                    center_x=4, center_y=11, board_dir=-1)
+        )
 
-        # Place a stack at 1,2
-        stack = Stack(board_x=1, board_y=2)
-        stack.push(self.engine, Flat.BLACK)
-        stack.push(self.engine, Flat.BLACK)
-        stack.push(self.engine, Flat.BLACK)
-        stack.push(self.engine, Flat.BLACK)
-        stack.push(self.engine, Flat.BLACK)
-        stack.push(self.engine, Flat.BLACK)
-        stack.push(self.engine, Flat.BLACK)
-        stack.push(self.engine, Flat.BLACK)
-        self.stack_handler.add_stack(stack)
+        # Placement handler (pick reserve pieces, place on the board)
+        self.placement_handler = PlacementHandler(
+            self.engine, self.reserves, board_size=5, on_place=self.on_piece_placed
+        )
+        self.placement_handler.set_current_player(self.current_player)
 
     def handle_input(self, input_handler):
         super().handle_input(input_handler)
 
         # Skip all input if console is open
         if self.engine.scene_handler.console.is_open:
+            return
+
+        # GUI clicks take priority; consume the click so it can't leak into the game
+        if self.start_menu is not None and self.start_menu.handle_click(input_handler):
+            return
+        if self.win_panel is not None and self.win_panel.handle_click(input_handler):
             return
 
         # Camera switching
@@ -231,6 +257,9 @@ class TakScene(Scene):
 
         if self.camera_mode == self.camera_orbit_mode:
             self.orbit_cam.handle_input(input_handler)
+            if (self.placement_handler and not self.game_over
+                    and not self.orbit_cam.is_animating()):
+                self.placement_handler.handle_input(input_handler)
         else:
             # Free camera mode
             # IF mouse 3 then
@@ -256,6 +285,10 @@ class TakScene(Scene):
         if self.stack_handler:
             self.stack_handler.update()
 
+        # Update placement handler (orbit mode only)
+        if self.placement_handler and self.camera_mode == self.camera_orbit_mode:
+            self.placement_handler.update(dt)
+
         # Camera updates - Skip if console is open
         if not self.engine.scene_handler.console.is_open:
             if self.camera_mode == self.camera_orbit_mode:
@@ -274,26 +307,102 @@ class TakScene(Scene):
             self.sun_light.destroy()
         if self.skybox:
             self.skybox.destroy()
-        for block in self.board_blocks:
-            block.destroy()
-        for flat in self.flats:
-            flat.destroy()
-        for label in self.board_labels:
-            label.removeNode()
-        if self.table:
-            self.table.destroy()
+        if self.win_panel:
+            self.win_panel.destroy()
+            self.win_panel = None
+        if self.start_menu:
+            self.start_menu.destroy()
+            self.start_menu = None
+        self._destroy_level()
         if self.free_cam:
             self.free_cam.destroy()
         if self.orbit_cam:
             self.orbit_cam.destroy()
 
+    def on_piece_placed(self):
+        # Resolve the board for the player who just moved before passing the turn
+        mover = self.current_player
+        reserves_empty = any(len(r.pieces) == 0 for r in self.reserves)
+        outcome = check_win(
+            self.placement_handler.board_stacks, self.board.size, mover, reserves_empty
+        )
+        if outcome is not None:
+            self.show_win(outcome)
+            return
+
+        # Alternate turns and sweep the camera to the other player's side
+        self.current_player = 1 - self.current_player
+        self.placement_handler.set_current_player(self.current_player)
+        self.orbit_cam.rotate_by(180, duration=1.2)
+
+    def show_win(self, outcome):
+        _kind, winner = outcome
+        black = (0, 0, 0, 1)
+        white = (1, 1, 1, 1)
+        if winner == 0:
+            message, bg, fg = "BLACK WON", black, white
+        elif winner == 1:
+            message, bg, fg = "WHITE WON", white, black
+        else:
+            message, bg, fg = "DRAW", (0.2, 0.2, 0.2, 1), white
+        self.game_over = True
+        if self.win_panel:
+            self.win_panel.destroy()
+        self.win_panel = WinPanel(message, bg, fg, on_play_again=self.restart_game)
+
+    def show_start_menu(self):
+        if self.start_menu:
+            self.start_menu.destroy()
+        self.start_menu = StartMenu(on_play=self.start_game, on_quit=self.engine.quit)
+
+    def start_game(self):
+        if self.start_menu:
+            self.start_menu.destroy()
+            self.start_menu = None
+        self.restart_game()
+
+    def restart_game(self):
+        if self.win_panel:
+            self.win_panel.destroy()
+            self.win_panel = None
+        self.game_over = False
+        self.current_player = 0
+        self._destroy_level()
+        self.setup_level()
+        self.orbit_cam.reset()
+
+    def _destroy_level(self):
+        if self.board:
+            self.board.destroy()
+            self.board = None
+        if self.stack_handler:
+            self.stack_handler.destroy()
+            self.stack_handler = None
+        if self.placement_handler:
+            self.placement_handler.destroy()
+            self.placement_handler = None
+        for reserve in self.reserves:
+            reserve.destroy()
+        self.reserves = []
+        for label in self.board_labels:
+            label.removeNode()
+        self.board_labels = []
+        if self.table:
+            self.table.destroy()
+            self.table = None
+
     def on_scroll_up(self):
+        # Placement consumes scroll when hovering/holding; otherwise it zooms
+        if self.placement_handler and self.placement_handler.handle_scroll(1):
+            return
         if self.stack_handler:
             self.stack_handler.on_scroll_up()
         elif self.orbit_cam:
             self.orbit_cam.on_scroll_up()
 
     def on_scroll_down(self):
+        if self.placement_handler and self.placement_handler.handle_scroll(-1):
+            return
         if self.stack_handler:
             self.stack_handler.on_scroll_down()
         elif self.orbit_cam:

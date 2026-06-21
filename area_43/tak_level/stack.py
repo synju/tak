@@ -6,8 +6,7 @@ from area_43.tak_level.flat import Flat
 
 class Stack:
     def __init__(self, board_x, board_y):
-        self.x = board_x * BoardBlock.WIDTH
-        self.y = board_y * BoardBlock.LENGTH
+        self.x, self.y = BoardBlock.board_to_world(board_x, board_y)
         self.flats = []
         self.highlight = None
         self.selected_index = 0

@@ -79,3 +79,9 @@ class StackHandler:
             self._scroll_delta = 1
         elif self._orbit_cam:
             self._orbit_cam.on_scroll_down()
+
+    def destroy(self):
+        for stack in self.stacks:
+            stack.destroy()
+        self.stacks = []
+        self.hovered_stack = None
