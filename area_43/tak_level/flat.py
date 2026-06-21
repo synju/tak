@@ -1,6 +1,7 @@
 from engine.mesh_object import MeshObject
 from panda3d.core import GeomVertexFormat, GeomVertexData, GeomVertexWriter
 from panda3d.core import Geom, GeomTriangles, GeomNode
+from panda3d.bullet import BulletBoxShape, BulletRigidBodyNode
 
 
 class Flat:
@@ -18,7 +19,10 @@ class Flat:
         self.position = (x, y, z)
         self.mesh = MeshObject(engine, "Flat")
         self.mesh_node = None
+        self.body = None
+        self.body_np = None
         self._build_mesh()
+        self._create_collision()
 
     def _build_mesh(self):
         if self.mesh_node:
@@ -130,9 +134,23 @@ class Flat:
 
         self.mesh_node = self.mesh.node.attachNewNode(node)
 
+    def _create_collision(self):
+        if self.body:
+            self.engine.physics.removeRigidBody(self.body)
+            self.body_np.removeNode()
+
+        shape = BulletBoxShape((Flat.WIDTH / 2, Flat.LENGTH / 2, Flat.HEIGHT / 2))
+        self.body = BulletRigidBodyNode("flat_collision")
+        self.body.addShape(shape)
+        self.body_np = self.engine.render.attachNewNode(self.body)
+        self.body_np.setPos(*self.position)
+        self.engine.physics.attachRigidBody(self.body)
+
     def set_position(self, x, y, z):
         self.position = (x, y, z)
         self._build_mesh()
+        if self.body_np:
+            self.body_np.setPos(x, y, z)
 
     def show(self):
         if self.mesh_node:
@@ -143,6 +161,11 @@ class Flat:
             self.mesh_node.hide()
 
     def destroy(self):
+        if self.body:
+            self.engine.physics.removeRigidBody(self.body)
+            self.body_np.removeNode()
+            self.body = None
+            self.body_np = None
         if self.mesh_node:
             self.mesh_node.removeNode()
             self.mesh_node = None

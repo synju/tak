@@ -53,26 +53,26 @@ class OrbitCamera(Camera):
         self._scroll_delta = 0
 
         # Register scroll wheel events
-        base.accept("wheel_up", self._on_scroll_up)
-        base.accept("wheel_down", self._on_scroll_down)
+        base.accept("wheel_up", self.on_scroll_up)
+        base.accept("wheel_down", self.on_scroll_down)
 
-        self._update_position()
+        self.update_position()
 
     def activate(self):
         """Activate this camera"""
         self.active = True
         self._apply_clip_distances()
-        self._update_position()
+        self.update_position()
 
-    def _on_scroll_up(self):
+    def on_scroll_up(self):
         """Handle scroll wheel up (zoom in)"""
         self._scroll_delta = -1
 
-    def _on_scroll_down(self):
+    def on_scroll_down(self):
         """Handle scroll wheel down (zoom out)"""
         self._scroll_delta = 1
 
-    def _update_position(self):
+    def update_position(self):
         """Calculate camera position from orbit parameters"""
         yaw_rad = math.radians(self.yaw)
         pitch_rad = math.radians(self.pitch)
@@ -130,7 +130,7 @@ class OrbitCamera(Camera):
                 self.target[1] -= (right_y * dx + up_y * dy) * actual_pan_speed
                 self.target[2] -= (right_z * dx + up_z * dy) * actual_pan_speed
 
-                self._update_position()
+                self.update_position()
 
         # Middle mouse (no shift) = Orbit
         elif middle_mouse and not shift_held:
@@ -145,7 +145,7 @@ class OrbitCamera(Camera):
                 self.yaw += dx * self.sensitivity
                 self.pitch -= dy * self.sensitivity
                 self.pitch = max(self.min_pitch, min(self.max_pitch, self.pitch))
-                self._update_position()
+                self.update_position()
 
         # Release mouse lock when middle mouse released
         else:
@@ -166,7 +166,7 @@ class OrbitCamera(Camera):
             self.distance = max(
                 self.min_distance, min(self.max_distance, self.distance)
             )
-            self._update_position()
+            self.update_position()
 
         # Always reset scroll delta
         self._scroll_delta = 0
@@ -175,18 +175,18 @@ class OrbitCamera(Camera):
         """Zoom in/out by amount (positive = zoom out)"""
         self.distance *= 1 + amount * self.zoom_speed
         self.distance = max(self.min_distance, min(self.max_distance, self.distance))
-        self._update_position()
+        self.update_position()
 
     def set_target(self, x, y, z):
         """Set the orbit target point"""
         self.target = [x, y, z]
-        self._update_position()
+        self.update_position()
 
     def frame_object(self, center, size):
         """Frame camera to view an object"""
         self.target = list(center)
         self.distance = size * 2.5
-        self._update_position()
+        self.update_position()
 
     def reset(self):
         """Reset camera to default or specified view"""
@@ -194,7 +194,7 @@ class OrbitCamera(Camera):
         self.distance = self.original_distance
         self.yaw = self.original_yaw
         self.pitch = self.original_pitch
-        self._update_position()
+        self.update_position()
 
     def destroy(self):
         """Clean up event handlers"""

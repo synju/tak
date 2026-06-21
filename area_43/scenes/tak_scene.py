@@ -1,13 +1,13 @@
 from direct.showbase.ShowBase import ShowBase
-from panda3d.core import WindowProperties
+
 from area_43.cameras.free_flying_camera import FreeFlyingCamera
-from area_43.tak_level.board import Board
-from area_43.tak_level.board_block import BoardBlock
-from area_43.tak_level.flat import Flat
-from area_43.tak_level.table import Table
 from area_43.cameras.orbit_camera import OrbitCamera
+from area_43.tak_level.board import Board
+from area_43.tak_level.flat import Flat
+from area_43.tak_level.stack import Stack
+from area_43.tak_level.stack_handler import StackHandler
+from area_43.tak_level.table import Table
 from engine.light import AmbientLight, DirectionalLight
-from engine.renderer import Renderer
 from engine.scene import Scene
 from engine.skybox import Skybox
 
@@ -17,6 +17,10 @@ base: ShowBase
 class TakScene(Scene):
     def __init__(self, engine):
         super().__init__(engine, "tak_scene")
+
+        # Debugging Mode
+        #self.engine.debug_enabled = True
+        self.debug = True
 
         # Disable Grid
         self.engine.scene_handler.grid.hide()
@@ -40,6 +44,9 @@ class TakScene(Scene):
         self.board_blocks = []
         self.flats = []
         self.table = None
+
+        # Stack handler
+        self.stack_handler = None
 
         # Mouse Boolean
         self.right_mouse_down = False
@@ -66,6 +73,10 @@ class TakScene(Scene):
 
         # Level
         self.setup_level()
+
+        # Scroll wheel for stack selection
+        base.accept("wheel_up", self.on_scroll_up)
+        base.accept("wheel_down", self.on_scroll_down)
 
     def setup_skybox(self):
         self.skybox = Skybox(
@@ -135,6 +146,13 @@ class TakScene(Scene):
         # Create Board
         self.board = Board(self.engine, size=5)
 
+        # Number Board Blocks
+        
+
+        # Create stack handler
+        self.stack_handler = StackHandler(self.engine)
+        self.stack_handler.set_orbit_camera(self.orbit_cam)
+
         # Create a stack of 4 flats on top of first board block
         layer_index = 0
         colors = [Flat.BLACK, Flat.WHITE]
@@ -144,11 +162,16 @@ class TakScene(Scene):
             layer_index += 1
 
         # Place a stack at 1,2
-        from area_43.tak_level.stack import Stack
-
-        self.stack = Stack(board_x=1, board_y=2)
-        self.stack.push(self.engine, Flat.BLACK)
-        self.stack.push(self.engine, Flat.BLACK)
+        stack = Stack(board_x=1, board_y=2)
+        stack.push(self.engine, Flat.BLACK)
+        stack.push(self.engine, Flat.BLACK)
+        stack.push(self.engine, Flat.BLACK)
+        stack.push(self.engine, Flat.BLACK)
+        stack.push(self.engine, Flat.BLACK)
+        stack.push(self.engine, Flat.BLACK)
+        stack.push(self.engine, Flat.BLACK)
+        stack.push(self.engine, Flat.BLACK)
+        self.stack_handler.add_stack(stack)
 
         # Create table beneath the board
         self.table = Table(self.engine, x=4, y=4, z=-0.5)
@@ -212,22 +235,16 @@ class TakScene(Scene):
         # Physics
         self.engine.physics.doPhysics(dt)
 
+        # Update stack handler
+        if self.stack_handler:
+            self.stack_handler.update()
+
         # Camera updates - Skip if console is open
         if not self.engine.scene_handler.console.is_open:
             if self.camera_mode == self.camera_orbit_mode:
                 self.orbit_cam.update(dt)
             else:
                 self.free_cam.update(dt)
-
-        # print xyz location of free camera here
-        # print(
-        #     f"FreeCam: X={self.free_cam.position[0]:.2f}, Y={self.free_cam.position[1]:.2f}, Z={self.free_cam.position[2]:.2f}"
-        # )
-
-        # print orientation of free camera
-        # print(
-        #     f"FreeCam: Pitch={self.free_cam.pitch:.2f}, Heading={self.free_cam.heading:.2f}"
-        # )
 
     def on_exit(self):
         super().on_exit()
@@ -247,3 +264,15 @@ class TakScene(Scene):
             self.free_cam.destroy()
         if self.orbit_cam:
             self.orbit_cam.destroy()
+
+    def on_scroll_up(self):
+        if self.stack_handler:
+            self.stack_handler.on_scroll_up()
+        elif self.orbit_cam:
+            self.orbit_cam.on_scroll_up()
+
+    def on_scroll_down(self):
+        if self.stack_handler:
+            self.stack_handler.on_scroll_down()
+        elif self.orbit_cam:
+            self.orbit_cam.on_scroll_down()
