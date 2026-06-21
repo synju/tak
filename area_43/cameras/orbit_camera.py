@@ -16,10 +16,12 @@ class OrbitCamera(Camera):
         yaw=180.0,
         pitch=40.0,
         sensitivity=50,
-        min_distance=0.5,
-        max_distance=100.0,
-        min_pitch=10, # Default 89
-        max_pitch=89,
+        #min_distance=0.5,
+        min_distance=9,
+        #max_distance=100.0,
+        max_distance=14.0,
+        min_pitch=10, # Default -89
+        max_pitch=75, # Default 89
         zoom_speed=0.1,
         pan_speed=0.5,
         near_clip=0.1,
