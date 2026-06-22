@@ -10,6 +10,7 @@ from area_43.tak_level.table import Table
 from area_43.tak_level.stack_handler import StackHandler
 from area_43.tak_level.placement_handler import PlacementHandler
 from area_43.tak_level.win_resolver import check_win
+from area_43.tak_level.tps import game_state_text
 from area_43.tak_level.win_panel import WinPanel
 from area_43.tak_level.start_menu import StartMenu
 from area_43.cameras.orbit_camera import OrbitCamera
@@ -63,6 +64,7 @@ class TakScene(Scene):
         # Turn state (0 = Player 1 / black, 1 = Player 2 / white)
         self.current_player = 0
         self.start_player = 0  # who moves first (chosen at the menu)
+        self.move_count = 0  # plies played this game (for the TPS move number)
 
         # Win state
         self.win_panel = None
@@ -247,6 +249,10 @@ class TakScene(Scene):
         if input_handler.is_key_down("q"):
             self.engine.quit()
 
+        # Dump the board as TPS + reserves to the console
+        if input_handler.is_key_down("t"):
+            self.print_state()
+
         # Reset camera position
         if input_handler.is_key_down("r"):
             if self.camera_mode == self.camera_orbit_mode:
@@ -325,6 +331,9 @@ class TakScene(Scene):
             self.orbit_cam.destroy()
 
     def on_piece_placed(self):
+        # A turn just completed
+        self.move_count += 1
+
         # Resolve the board for the player who just moved before passing the turn
         mover = self.current_player
         reserves_empty = any(len(r.pieces) == 0 for r in self.reserves)
@@ -339,6 +348,16 @@ class TakScene(Scene):
         self.current_player = 1 - self.current_player
         self.placement_handler.set_current_player(self.current_player)
         self.orbit_cam.rotate_by(180, duration=1.2)
+
+    def print_state(self):
+        # TPS move number is the full-move count (increments after both sides move)
+        if not self.placement_handler or not self.board:
+            return
+        move_number = self.move_count // 2 + 1
+        print(game_state_text(
+            self.placement_handler.board_stacks, self.board.size,
+            self.current_player, move_number, self.reserves,
+        ))
 
     def show_win(self, outcome):
         _kind, winner = outcome
@@ -403,6 +422,7 @@ class TakScene(Scene):
             self.win_panel = None
         self.game_over = False
         self.current_player = self.start_player
+        self.move_count = 0
         self._destroy_level()
         self.setup_level()
         self.orbit_cam.reset()
