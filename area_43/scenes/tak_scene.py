@@ -22,6 +22,8 @@ base: ShowBase
 
 
 class TakScene(Scene):
+    MENU_SPIN_SPEED = 6.0  # deg/sec the camera drifts around the board on the menu
+
     def __init__(self, engine):
         super().__init__(engine, "tak_scene")
 
@@ -60,6 +62,7 @@ class TakScene(Scene):
 
         # Turn state (0 = Player 1 / black, 1 = Player 2 / white)
         self.current_player = 0
+        self.start_player = 0  # who moves first (chosen at the menu)
 
         # Win state
         self.win_panel = None
@@ -95,7 +98,9 @@ class TakScene(Scene):
         base.accept("wheel_up", self.on_scroll_up)
         base.accept("wheel_down", self.on_scroll_down)
 
-        # Start menu (the level is built when PLAY is clicked)
+        # Build the game up front, then overlay the start menu. PLAY just hides
+        # the menu so there's no load pause when starting.
+        self.setup_level()
         self.show_start_menu()
 
     def setup_skybox(self):
@@ -220,12 +225,6 @@ class TakScene(Scene):
         if self.engine.scene_handler.console.is_open:
             return
 
-        # GUI clicks take priority; consume the click so it can't leak into the game
-        if self.start_menu is not None and self.start_menu.handle_click(input_handler):
-            return
-        if self.win_panel is not None and self.win_panel.handle_click(input_handler):
-            return
-
         # Camera switching
         if input_handler.is_key_down("c"):
             # Switch to Free FLying Camera
@@ -257,8 +256,8 @@ class TakScene(Scene):
 
         if self.camera_mode == self.camera_orbit_mode:
             self.orbit_cam.handle_input(input_handler)
-            if (self.placement_handler and not self.game_over
-                    and not self.orbit_cam.is_animating()):
+            if (self.placement_handler and self.start_menu is None
+                    and not self.game_over and not self.orbit_cam.is_animating()):
                 self.placement_handler.handle_input(input_handler)
         else:
             # Free camera mode
@@ -285,14 +284,20 @@ class TakScene(Scene):
         if self.stack_handler:
             self.stack_handler.update()
 
-        # Update placement handler (orbit mode only)
-        if self.placement_handler and self.camera_mode == self.camera_orbit_mode:
+        # Update placement handler (orbit mode only; not while the menu is up)
+        if (self.placement_handler and self.start_menu is None
+                and self.camera_mode == self.camera_orbit_mode):
             self.placement_handler.update(dt)
 
         # Camera updates - Skip if console is open
         if not self.engine.scene_handler.console.is_open:
             if self.camera_mode == self.camera_orbit_mode:
                 self.orbit_cam.update(dt)
+
+                # Slowly spin around the board while the menu is up
+                if self.start_menu is not None:
+                    self.orbit_cam.yaw += TakScene.MENU_SPIN_SPEED * dt
+                    self.orbit_cam.update_position()
 
                 # Print out camera yaw and pitch
                 # print(f"Camera Yaw: {self.orbit_cam.yaw} -- Camera Pitch: {self.orbit_cam.pitch}")
@@ -348,28 +353,60 @@ class TakScene(Scene):
         self.game_over = True
         if self.win_panel:
             self.win_panel.destroy()
-        self.win_panel = WinPanel(message, bg, fg, on_play_again=self.restart_game)
+        self.win_panel = WinPanel(
+            message, bg, fg,
+            on_play_again=self.restart_game,
+            on_quit_to_menu=self.quit_to_menu,
+        )
 
     def show_start_menu(self):
         if self.start_menu:
             self.start_menu.destroy()
-        self.start_menu = StartMenu(on_play=self.start_game, on_quit=self.engine.quit)
+        self.start_menu = StartMenu(
+            [("PLAY", self.show_color_menu), ("QUIT", self.engine.quit)],
+            credit=True,
+        )
 
-    def start_game(self):
+    def show_color_menu(self):
+        # PLAY -> choose which side moves first.
+        if self.start_menu:
+            self.start_menu.destroy()
+        self.start_menu = StartMenu(
+            [("START AS BLACK", lambda: self.start_game(0)),
+             ("START AS WHITE", lambda: self.start_game(1))],
+        )
+
+    def start_game(self, player):
+        # Level is already built; set the starting side, face it, drop the menu.
+        self.start_player = player
+        self.current_player = player
+        if self.placement_handler:
+            self.placement_handler.set_current_player(player)
+        self._face_player(player)
         if self.start_menu:
             self.start_menu.destroy()
             self.start_menu = None
+
+    def _face_player(self, player):
+        # Black (0) sits on -y (yaw 180); white (1) on +y (yaw 0).
+        self.orbit_cam.yaw = 0.0 if player == 1 else 180.0
+        self.orbit_cam.update_position()
+
+    def quit_to_menu(self):
+        # Rebuild a fresh board and show the start menu over it.
         self.restart_game()
+        self.show_start_menu()
 
     def restart_game(self):
         if self.win_panel:
             self.win_panel.destroy()
             self.win_panel = None
         self.game_over = False
-        self.current_player = 0
+        self.current_player = self.start_player
         self._destroy_level()
         self.setup_level()
         self.orbit_cam.reset()
+        self._face_player(self.start_player)
 
     def _destroy_level(self):
         if self.board:

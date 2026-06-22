@@ -518,7 +518,10 @@ class PlacementHandler:
 
         if not self.carry:
             self._resolve()
-        # else: the remaining carry eases to the new anchor via _animate_carry()
+        else:
+            # Preview now reflects the next piece to drop (e.g. a wall on top).
+            self._rebuild_preview_for(self.carry[0])
+        # the remaining carry eases to the new anchor via _animate_carry()
 
     def cancel(self):
         """Right-click: revert the whole in-progress move to its starting state."""
