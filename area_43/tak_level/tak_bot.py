@@ -198,18 +198,26 @@ LADDER = [
     (7, 6, 30.0),   # 10 depth 7 -- hardest this engine reaches in time
 ]
 
+# Adaptive early-exit: stop deepening once the answer is clear, so easy
+# positions resolve fast and only hard ones spend the full budget (moderate).
+EASY_MIN_DEPTH = 3   # search at least this deep before any early exit
+EASY_MARGIN = 2.0    # best must lead 2nd-best by this (eval units) to bail
+
 
 def choose_move(state, level, rng=None, time_budget=None):
     """Pick a move for state.to_move. Difficulty (1..10) selects from LADDER.
 
     Iterative-deepening alpha-beta over all root moves, capped by the level's
     time budget. The transposition table is shared across passes so deeper
-    iterations reuse earlier work.
+    iterations reuse earlier work. Search exits early on trivial positions
+    (one move / an immediate win) and on a stable, dominant best move.
     """
     rng = rng or random
     moves = generate_moves(state)
     if not moves:
         return None
+    if len(moves) == 1:
+        return moves[0]
     root = state.to_move
     target_depth, beam, budget = LADDER[max(1, min(level, len(LADDER))) - 1]
     if time_budget is not None:
@@ -220,8 +228,11 @@ def choose_move(state, level, rng=None, time_budget=None):
     # Order root moves by a 1-ply score (improves pruning); reordered each pass.
     scored = [[evaluate(apply_move(state, m), root), m] for m in moves]
     scored.sort(key=lambda sm: sm[0], reverse=True)
+    if scored[0][0] >= WIN:  # a move wins outright -- take it, skip deepening
+        return rng.choice([m for value, m in scored if value >= WIN])
 
     best_move = scored[0][1]
+    prev_best = None
     for depth in range(2, target_depth + 1):
         try:
             # Full window per root move so each gets its EXACT value (not an
@@ -234,9 +245,16 @@ def choose_move(state, level, rng=None, time_budget=None):
                     child, depth - 1, -INF, INF, root, deadline, tt, beam)
         except _TimeUp:
             break  # incomplete pass: keep best_move from the last full depth
-        best = max(value for value, _ in scored)
-        best_move = rng.choice([m for value, m in scored if value == best])
         scored.sort(key=lambda sm: sm[0], reverse=True)
+        best = scored[0][0]
+        best_move = rng.choice([m for value, m in scored if value == best])
+        if best >= WIN:
+            break  # forced win found -- no deeper search can improve on it
+        second = scored[1][0] if len(scored) > 1 else -INF
+        stable = best_move == prev_best  # same choice two depths running
+        prev_best = best_move
+        if depth >= EASY_MIN_DEPTH and stable and (best - second) >= EASY_MARGIN:
+            break  # easy move: stable and clearly ahead, deeper search won't help
         if time.monotonic() >= deadline:
             break
     return best_move
