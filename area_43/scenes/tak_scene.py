@@ -1,3 +1,4 @@
+import os
 import queue
 import threading
 
@@ -17,6 +18,7 @@ from area_43.tak_level.tps import game_state_text
 from area_43.tak_level.win_panel import WinPanel
 from area_43.tak_level.start_menu import StartMenu
 from area_43.tak_level.difficulty_menu import DifficultyMenu
+from area_43.ai.play import load_opponent
 from area_43.cameras.orbit_camera import OrbitCamera
 from engine.light import AmbientLight, DirectionalLight
 from engine.renderer import Renderer
@@ -24,6 +26,9 @@ from engine.scene import Scene
 from engine.skybox import Skybox
 
 base: ShowBase
+
+
+NN_DIR = os.path.join(os.path.dirname(__file__), "..", "test_nn")  # one .pt to play vs
 
 
 class TakScene(Scene):
@@ -86,6 +91,7 @@ class TakScene(Scene):
         self.bot_timer = 0.0
         self.bot_thread = None   # worker computing the bot's move (off main thread)
         self.bot_queue = None
+        self.nn_opponent = None  # set for a PLAY NN game; reuses the bot turn pipeline
 
         # Mouse Boolean
         self.right_mouse_down = False
@@ -386,12 +392,16 @@ class TakScene(Scene):
     def _start_bot_thinking(self):
         # Snapshot the position on the main thread (reads live pieces), then run
         # the pure search on a worker; build_state copies into plain data.
-        from area_43.tak_level.tak_bot import choose_move
         state = self.placement_handler.build_state()
-        level = self.bot_level
+        if self.nn_opponent is not None:
+            think = lambda: self.nn_opponent.choose_move(state)
+        else:
+            from area_43.tak_level.tak_bot import choose_move
+            level = self.bot_level
+            think = lambda: choose_move(state, level)
         self.bot_queue = queue.Queue(maxsize=1)
         self.bot_thread = threading.Thread(
-            target=lambda: self.bot_queue.put(choose_move(state, level)),
+            target=lambda: self.bot_queue.put(think()),
             daemon=True,
         )
         self.bot_thread.start()
@@ -438,6 +448,7 @@ class TakScene(Scene):
         self.start_menu = StartMenu(
             [("PLAY", self.show_color_menu),
              ("PLAY BOT", self.show_bot_color_menu),
+             ("PLAY NN", self.show_nn_color_menu),
              ("QUIT", self.engine.quit)],
             credit=True,
         )
@@ -467,6 +478,28 @@ class TakScene(Scene):
             on_select=lambda level: self.start_bot_game(human_player, level)
         )
 
+    def show_nn_color_menu(self):
+        # PLAY NN -> choose the human's side; the NN takes the other.
+        if self.start_menu:
+            self.start_menu.destroy()
+        self.start_menu = StartMenu(
+            [("START AS BLACK", lambda: self.start_nn_game(0)),
+             ("START AS WHITE", lambda: self.start_nn_game(1))],
+        )
+
+    def start_nn_game(self, human_player):
+        # Load the single model in test_nn/; bail back to the menu if none is there.
+        opponent = load_opponent(NN_DIR)
+        if opponent is None:
+            print(f"[PLAY NN] no .pt model found in {os.path.normpath(NN_DIR)}")
+            self.show_start_menu()
+            return
+        print(f"[PLAY NN] loaded {opponent.name} on {opponent.device}")
+        self.start_game(human_player)        # clears flags + nn_opponent, faces side
+        self.vs_bot = True                   # reuse the bot turn pipeline
+        self.bot_player = 1 - human_player
+        self.nn_opponent = opponent
+
     def start_bot_game(self, human_player, level):
         # Human plays human_player; bot takes the other side.
         self.start_game(human_player)
@@ -477,6 +510,7 @@ class TakScene(Scene):
     def start_game(self, player):
         # Level is already built; set the starting side, face it, drop the menu.
         self.vs_bot = False
+        self.nn_opponent = None  # cleared here; set afterwards only for a PLAY NN game
         self.bot_pending = False
         self.bot_thread = None  # abandon any in-flight worker from a prior game
         self.start_player = player

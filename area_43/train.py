@@ -47,6 +47,7 @@ KEEP_CHECKPOINTS = 2       # keep only the newest N; older ones are pruned on sa
 # next to this file (area_43/models), independent of the current directory
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 PROGRESS = os.path.join(MODELS_DIR, "progress.txt")
+ARCHIVE_DIR = os.path.join(MODELS_DIR, "archive")  # milestone snapshots, never pruned
 
 
 def _log(msg):
@@ -75,6 +76,22 @@ def _prune(keep):
             os.remove(old)
         except OSError:
             pass
+
+
+def _archive(net, it, wr, label):
+    """Save a play-only milestone snapshot into archive/ (never pruned). Holds
+    just the net + config, so it's small and ready to load as an opponent.
+    Skips if this rung was already captured."""
+    os.makedirs(ARCHIVE_DIR, exist_ok=True)
+    if glob.glob(os.path.join(ARCHIVE_DIR, f"nn_{label}_*.pt")):
+        return None  # already archived this level
+    path = os.path.join(ARCHIVE_DIR, f"nn_{label}_iter{it}_wr{round(wr * 100)}.pt")
+    tmp = path + ".tmp"
+    torch.save({"net": net.state_dict(),
+                "config": {"channels": CHANNELS, "blocks": BLOCKS, "size": SIZE},
+                "iteration": it, "win_rate": wr, "label": label}, tmp)
+    os.replace(tmp, path)
+    return path
 
 
 def _save(net, opt, it, phase, buffer):
@@ -289,6 +306,10 @@ def main():
             if args.eval and it % EVAL_EVERY == 0:
                 wr = _evaluate(net, action_space, device, rng, bot_rng, EVAL_GAMES)
                 _log(f"  eval vs level-1: {wr:.0%}")
+                if wr >= 0.50:  # ~matches level-1 -> capture as the level-1 NN rung
+                    apath = _archive(net, it, wr, "lvl_1_bot")
+                    if apath:
+                        _log(f"  >>> milestone: archived {os.path.basename(apath)}")
                 if auto_switch and phase == "bootstrap" and wr >= WIN_THRESHOLD:
                     phase = "selfplay"
                     _log(f"  >>> reached {wr:.0%} -- switching to self-play")
