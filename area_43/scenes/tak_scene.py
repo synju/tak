@@ -1,3 +1,6 @@
+import queue
+import threading
+
 from direct.showbase.ShowBase import ShowBase
 from panda3d.core import WindowProperties, Point3, Point2, TextNode
 from area_43.cameras.free_flying_camera import FreeFlyingCamera
@@ -13,6 +16,7 @@ from area_43.tak_level.win_resolver import check_win
 from area_43.tak_level.tps import game_state_text
 from area_43.tak_level.win_panel import WinPanel
 from area_43.tak_level.start_menu import StartMenu
+from area_43.tak_level.difficulty_menu import DifficultyMenu
 from area_43.cameras.orbit_camera import OrbitCamera
 from engine.light import AmbientLight, DirectionalLight
 from engine.renderer import Renderer
@@ -24,6 +28,7 @@ base: ShowBase
 
 class TakScene(Scene):
     MENU_SPIN_SPEED = 6.0  # deg/sec the camera drifts around the board on the menu
+    BOT_DELAY = 0.6        # seconds the bot "thinks" before moving
 
     def __init__(self, engine):
         super().__init__(engine, "tak_scene")
@@ -72,6 +77,15 @@ class TakScene(Scene):
 
         # Start menu
         self.start_menu = None
+
+        # Bot opponent config (set via the PLAY BOT menu; bot brain not built yet)
+        self.vs_bot = False
+        self.bot_player = None  # which side the bot plays
+        self.bot_level = None   # difficulty 1 (easiest) .. 10 (hardest)
+        self.bot_pending = False
+        self.bot_timer = 0.0
+        self.bot_thread = None   # worker computing the bot's move (off main thread)
+        self.bot_queue = None
 
         # Mouse Boolean
         self.right_mouse_down = False
@@ -263,7 +277,8 @@ class TakScene(Scene):
         if self.camera_mode == self.camera_orbit_mode:
             self.orbit_cam.handle_input(input_handler)
             if (self.placement_handler and self.start_menu is None
-                    and not self.game_over and not self.orbit_cam.is_animating()):
+                    and not self.game_over and not self.orbit_cam.is_animating()
+                    and not (self.vs_bot and self.current_player == self.bot_player)):
                 self.placement_handler.handle_input(input_handler)
         else:
             # Free camera mode
@@ -294,6 +309,17 @@ class TakScene(Scene):
         if (self.placement_handler and self.start_menu is None
                 and self.camera_mode == self.camera_orbit_mode):
             self.placement_handler.update(dt)
+
+        # Bot's turn: brief delay, then think on a worker thread (so the game
+        # doesn't freeze), then apply the move back on the main thread.
+        if self.start_menu is None and not self.game_over:
+            if self.bot_pending and not self.orbit_cam.is_animating():
+                self.bot_timer -= dt
+                if self.bot_timer <= 0.0:
+                    self.bot_pending = False
+                    self._start_bot_thinking()
+            elif self.bot_thread is not None and not self.bot_thread.is_alive():
+                self._finish_bot_move()
 
         # Camera updates - Skip if console is open
         if not self.engine.scene_handler.console.is_open:
@@ -344,10 +370,38 @@ class TakScene(Scene):
             self.show_win(outcome)
             return
 
-        # Alternate turns and sweep the camera to the other player's side
+        # Alternate turns
         self.current_player = 1 - self.current_player
         self.placement_handler.set_current_player(self.current_player)
-        self.orbit_cam.rotate_by(180, duration=1.2)
+
+        if self.vs_bot:
+            # Camera stays on the human's side; queue the bot if it's its turn.
+            if self.current_player == self.bot_player:
+                self.bot_pending = True
+                self.bot_timer = TakScene.BOT_DELAY
+        else:
+            # Hotseat: sweep the camera to the other player's side.
+            self.orbit_cam.rotate_by(180, duration=1.2)
+
+    def _start_bot_thinking(self):
+        # Snapshot the position on the main thread (reads live pieces), then run
+        # the pure search on a worker; build_state copies into plain data.
+        from area_43.tak_level.tak_bot import choose_move
+        state = self.placement_handler.build_state()
+        level = self.bot_level
+        self.bot_queue = queue.Queue(maxsize=1)
+        self.bot_thread = threading.Thread(
+            target=lambda: self.bot_queue.put(choose_move(state, level)),
+            daemon=True,
+        )
+        self.bot_thread.start()
+
+    def _finish_bot_move(self):
+        move = self.bot_queue.get()
+        self.bot_thread = None
+        self.bot_queue = None
+        if move is not None:
+            self.placement_handler.apply_move(move)
 
     def print_state(self):
         # TPS move number is the full-move count (increments after both sides move)
@@ -382,12 +436,14 @@ class TakScene(Scene):
         if self.start_menu:
             self.start_menu.destroy()
         self.start_menu = StartMenu(
-            [("PLAY", self.show_color_menu), ("QUIT", self.engine.quit)],
+            [("PLAY", self.show_color_menu),
+             ("PLAY BOT", self.show_bot_color_menu),
+             ("QUIT", self.engine.quit)],
             credit=True,
         )
 
     def show_color_menu(self):
-        # PLAY -> choose which side moves first.
+        # PLAY -> choose which side moves first (two human players).
         if self.start_menu:
             self.start_menu.destroy()
         self.start_menu = StartMenu(
@@ -395,8 +451,34 @@ class TakScene(Scene):
              ("START AS WHITE", lambda: self.start_game(1))],
         )
 
+    def show_bot_color_menu(self):
+        # PLAY BOT -> choose the human's side, then difficulty.
+        if self.start_menu:
+            self.start_menu.destroy()
+        self.start_menu = StartMenu(
+            [("START AS BLACK", lambda: self.show_difficulty_menu(0)),
+             ("START AS WHITE", lambda: self.show_difficulty_menu(1))],
+        )
+
+    def show_difficulty_menu(self, human_player):
+        if self.start_menu:
+            self.start_menu.destroy()
+        self.start_menu = DifficultyMenu(
+            on_select=lambda level: self.start_bot_game(human_player, level)
+        )
+
+    def start_bot_game(self, human_player, level):
+        # Human plays human_player; bot takes the other side.
+        self.start_game(human_player)
+        self.vs_bot = True
+        self.bot_player = 1 - human_player
+        self.bot_level = level
+
     def start_game(self, player):
         # Level is already built; set the starting side, face it, drop the menu.
+        self.vs_bot = False
+        self.bot_pending = False
+        self.bot_thread = None  # abandon any in-flight worker from a prior game
         self.start_player = player
         self.current_player = player
         if self.placement_handler:
@@ -421,6 +503,8 @@ class TakScene(Scene):
             self.win_panel.destroy()
             self.win_panel = None
         self.game_over = False
+        self.bot_pending = False
+        self.bot_thread = None  # abandon any in-flight worker from a prior game
         self.current_player = self.start_player
         self.move_count = 0
         self._destroy_level()

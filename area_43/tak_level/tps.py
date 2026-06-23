@@ -76,17 +76,18 @@ def format_state(grid, size, to_move, move_number, reserve_cells):
 #     above stays importable without Panda3D) ---------------------------------
 
 def piece_cell(piece):
-    """(owner, kind) for a live piece object."""
+    """(owner, kind) for a live piece object. owner: 0 black/gold, 1 white/silver."""
+    from area_43.tak_level.flat import Flat
     from area_43.tak_level.wall import Wall
     from area_43.tak_level.capstone import Capstone
-    from area_43.tak_level.win_resolver import _owner
     if isinstance(piece, Wall):
         kind = WALL
     elif isinstance(piece, Capstone):
         kind = CAP
     else:
         kind = FLAT
-    return (_owner(piece), kind)
+    owner = 0 if tuple(piece.color) in (Flat.BLACK, Capstone.GOLD) else 1
+    return (owner, kind)
 
 
 def board_grid(board_stacks):

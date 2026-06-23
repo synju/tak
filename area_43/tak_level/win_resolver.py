@@ -1,29 +1,17 @@
-from area_43.tak_level.flat import Flat
-from area_43.tak_level.wall import Wall
-from area_43.tak_level.capstone import Capstone
+from area_43.tak_level.tps import board_grid, FLAT, WALL, CAP
 
 
-def _owner(piece):
-    """0 = black/gold, 1 = white/silver."""
-    c = tuple(piece.color)
-    if c in (Flat.BLACK, Capstone.GOLD):
-        return 0
-    if c in (Flat.WHITE, Capstone.SILVER):
-        return 1
-    return None
-
-
-def _road_cells(board_stacks, player):
+def _road_cells(grid, player):
     """Cells whose top piece counts toward a road for player (flats + capstones;
     walls do not form roads)."""
     cells = set()
-    for cell, stack in board_stacks.items():
+    for cell, stack in grid.items():
         if not stack:
             continue
-        top = stack[-1]
-        if isinstance(top, Wall):
+        owner, kind = stack[-1]
+        if kind == WALL:
             continue
-        if _owner(top) == player:
+        if owner == player:
             cells.add(cell)
     return cells
 
@@ -45,41 +33,46 @@ def _has_road(cells, size):
     return False
 
 
-def _road_winner(board_stacks, size, mover):
+def _road_winner(grid, size, mover):
     """Winner by road, preferring the player who just moved on a double road."""
-    roads = [p for p in (0, 1) if _has_road(_road_cells(board_stacks, p), size)]
+    roads = [p for p in (0, 1) if _has_road(_road_cells(grid, p), size)]
     if not roads:
         return None
     return mover if mover in roads else roads[0]
 
 
-def _flat_counts(board_stacks):
+def _flat_counts(grid):
     counts = [0, 0]
-    for stack in board_stacks.values():
+    for stack in grid.values():
         if not stack:
             continue
-        top = stack[-1]
-        if isinstance(top, Flat):  # only flat stones count; walls/capstones don't
-            counts[_owner(top)] += 1
+        owner, kind = stack[-1]
+        if kind == FLAT:  # only flat stones count; walls/capstones don't
+            counts[owner] += 1
     return counts
 
 
-def check_win(board_stacks, size, mover, reserves_empty):
-    """Resolve the board after a move.
+def check_win_grid(grid, size, mover, reserves_empty):
+    """Resolve a board given as an (owner, kind) grid.
 
     Returns ("road", winner) or ("flat", winner) where winner is 0, 1, or None
     (a flat-count tie), or None if the game continues.
     """
-    winner = _road_winner(board_stacks, size, mover)
+    winner = _road_winner(grid, size, mover)
     if winner is not None:
         return ("road", winner)
 
-    occupied = sum(1 for s in board_stacks.values() if s)
+    occupied = sum(1 for s in grid.values() if s)
     if occupied >= size * size or reserves_empty:
-        c0, c1 = _flat_counts(board_stacks)
+        c0, c1 = _flat_counts(grid)
         if c0 > c1:
             return ("flat", 0)
         if c1 > c0:
             return ("flat", 1)
         return ("flat", None)  # draw
     return None
+
+
+def check_win(board_stacks, size, mover, reserves_empty):
+    """Live entry point: resolve from the scene's board_stacks of piece objects."""
+    return check_win_grid(board_grid(board_stacks), size, mover, reserves_empty)

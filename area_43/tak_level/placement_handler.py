@@ -4,6 +4,7 @@ from area_43.tak_level.board_block import BoardBlock
 from area_43.tak_level.flat import Flat
 from area_43.tak_level.wall import Wall
 from area_43.tak_level.capstone import Capstone
+from area_43.tak_level.tps import FLAT, WALL, CAP, board_grid
 
 base: ShowBase
 
@@ -576,6 +577,76 @@ class PlacementHandler:
         if self.preview:
             self.preview.removeNode()
             self.preview = None
+
+    # --- bot bridge --------------------------------------------------------
+
+    def build_state(self):
+        """Snapshot the live game as a pure tak_rules.State for the bot."""
+        from area_43.tak_level.tak_rules import State
+        grid = board_grid(self.board_stacks)
+        stones, caps = [0, 0], [0, 0]
+        own_flat = {0: Flat.BLACK, 1: Flat.WHITE}
+        for p, reserve in enumerate(self.reserves):
+            for piece in reserve.pieces:
+                if isinstance(piece, Capstone):
+                    caps[p] += 1
+                elif piece.color == own_flat[p]:  # excludes the odd opponent stone
+                    stones[p] += 1
+        return State(grid, self.board_size, self.current_player,
+                     list(self.opening_done), stones, caps)
+
+    def _take_reserve(self, reserve, want_capstone=False, color=None):
+        """Remove and return a top-most matching reserve piece (or None)."""
+        match = [
+            p for p in reserve.pieces
+            if (want_capstone and isinstance(p, Capstone))
+            or (not want_capstone and isinstance(p, Flat)
+                and (color is None or p.color == color))
+        ]
+        if not match:
+            return None
+        piece = max(match, key=lambda pc: pc.position[2])  # highest in its column
+        reserve.pieces.remove(piece)
+        return piece
+
+    def apply_move(self, move):
+        """Execute a bot's data move on the live board, then resolve the turn."""
+        if move[0] == "place":
+            self._bot_place(self.current_player, move[1], move[2])
+        else:
+            self._bot_spread(move[1], move[2], move[3])
+        if self.on_place:
+            self.on_place()
+
+    def _bot_place(self, player, cell, kind):
+        reserve = self.reserves[player]
+        if not self.opening_done[player]:
+            piece = self._take_reserve(reserve, color=reserve.odd_color)
+            self._stack_piece(piece, cell)
+            self.opening_done[player] = True
+            return
+        if kind == CAP:
+            piece = self._take_reserve(reserve, want_capstone=True)
+        else:
+            piece = self._take_reserve(
+                reserve, color=Flat.BLACK if player == 0 else Flat.WHITE)
+            if kind == WALL:
+                lx, ly, _ = piece.position
+                color = piece.color
+                piece.destroy()
+                piece = Wall(self.engine, color, x=lx, y=ly)
+        self._stack_piece(piece, cell)
+
+    def _bot_spread(self, origin, direction, counts):
+        stack = self.board_stacks.get(origin, [])
+        taken = [stack.pop() for _ in range(sum(counts))]
+        taken.reverse()  # restore bottom..top order
+        idx, (cx, cy) = 0, origin
+        for cnt in counts:
+            cx, cy = cx + direction[0], cy + direction[1]
+            for piece in taken[idx:idx + cnt]:
+                self._stack_piece(piece, (cx, cy))
+            idx += cnt
 
     # --- cleanup -----------------------------------------------------------
 
