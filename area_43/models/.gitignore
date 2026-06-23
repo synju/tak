@@ -1,0 +1,4 @@
+# Checkpoints are large and machine-specific -- don't track them.
+*.pt
+*.pt.tmp
+progress.txt

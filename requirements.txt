@@ -6,6 +6,9 @@ panda3d-gltf
 # Math/vectors
 numpy
 
+# AI training (headless self-play)
+torch
+
 # Image handling
 pillow
 
