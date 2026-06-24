@@ -3,6 +3,7 @@ import os
 from engine.mesh_object import MeshObject
 from engine.geometry import make_wire_box_node
 from panda3d.bullet import BulletBoxShape, BulletRigidBodyNode
+from panda3d.core import Filename
 
 
 class Flat:
@@ -33,7 +34,9 @@ class Flat:
         key = cls._model_file(color)
         tmpl = Flat._TEMPLATES.get(key)
         if tmpl is None:
-            tmpl = engine.loader.loadModel(os.path.join(cls.MODEL_DIR, key))
+            # Absolute Panda path (forward slashes) so loadModel works on Windows too.
+            path = os.path.abspath(os.path.join(cls.MODEL_DIR, key))
+            tmpl = engine.loader.loadModel(Filename.fromOsSpecific(path))
             Flat._TEMPLATES[key] = tmpl
         return tmpl
 
