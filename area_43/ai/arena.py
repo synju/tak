@@ -1,17 +1,17 @@
 """Champion gating: a challenger net must beat the stored champion head-to-head
 before it replaces it. train.py runs this whenever the net clears 50% vs level-1.
 
-Each game randomizes the opening placements for variety, then both nets play
-greedily (argmax visit counts, no noise) so the result reflects pure strength.
+Matches are played with the bare policy head (NO search) -- that's how the net
+plays at deploy time, so the champion is chosen under deploy conditions. The first
+couple of plies are random placements for variety (else greedy nets replay one game).
 """
 import torch
 
 from area_43.tak_level.tak_rules import generate_moves, apply_move
 from area_43.tak_level.win_resolver import check_win_grid
 from area_43.tak_level.tak_bot import _reserves_empty
-from area_43.ai.encoder import encode, PLANES
+from area_43.ai.encoder import PLANES
 from area_43.ai.net import TakNet
-from area_43.ai import mcts
 from area_43.ai import selfplay as sp
 
 
@@ -20,10 +20,10 @@ def _winner(state, mover):
     return None if outcome is None else outcome[1]
 
 
-def play_match_game(nets, action_space, sims, device, max_flats, rng,
+def play_match_game(nets, action_space, device, max_flats, rng,
                     open_random=2, max_plies=400):
-    """One game; nets[p] plays player p. The first `open_random` plies are random
-    placements (variety); the rest are each net's greedy move. Returns winner id."""
+    """One game; nets[p] plays player p via its bare policy head. The first
+    `open_random` plies are random placements (variety). Returns winner id."""
     state = sp.new_game()
     mover = None
     for ply in range(max_plies):
@@ -35,11 +35,10 @@ def play_match_game(nets, action_space, sims, device, max_flats, rng,
         if ply < open_random:
             move = moves[int(rng.integers(len(moves)))]
         else:
-            counts = mcts.run(state, nets[state.to_move], encode, action_space,
-                              sims, device, max_flats, rng, add_noise=False)
-            if counts.sum() == 0:
+            move = sp.policy_move(nets[state.to_move], state, action_space,
+                                  device, max_flats)
+            if move is None:
                 break
-            move = action_space.moves[int(counts.argmax())]
         mover = state.to_move
         state = apply_move(state, move)
     return None if mover is None else _winner(state, mover)
@@ -55,10 +54,10 @@ def _load_net(path, action_space, device):
     return net
 
 
-def gate(challenger, champion_path, action_space, sims, device, max_flats, rng,
+def gate(challenger, champion_path, action_space, device, max_flats, rng,
          games=100):
-    """Play `games` between challenger and the saved champion, alternating colors
-    so first-move advantage cancels. Returns (challenger_wins, draws)."""
+    """Play `games` between challenger and the saved champion (bare policy head),
+    alternating colors so first-move advantage cancels. Returns (wins, draws)."""
     champion = _load_net(champion_path, action_space, device)
     challenger.eval()
     wins = draws = 0
@@ -68,7 +67,7 @@ def gate(challenger, champion_path, action_space, sims, device, max_flats, rng,
             nets, chal = (challenger, champion), 0  # challenger plays black
         else:
             nets, chal = (champion, challenger), 1  # challenger plays white
-        w = play_match_game(nets, action_space, sims, device, max_flats, rng)
+        w = play_match_game(nets, action_space, device, max_flats, rng)
         if w is None:
             draws += 1
         elif w == chal:

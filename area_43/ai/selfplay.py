@@ -8,6 +8,7 @@ policy over the action space, and who moved. Values are filled in at game end
 from each sample's mover's perspective.
 """
 import numpy as np
+import torch
 
 from area_43.tak_level.tak_rules import State, generate_moves, apply_move
 from area_43.tak_level.win_resolver import check_win_grid
@@ -48,10 +49,29 @@ def _finish(samples, winner):
     return out
 
 
+def policy_move(net, state, action_space, device, max_flats):
+    """Greedy move straight from the policy head: one forward pass, no search.
+    This is how the net plays at deploy time (instant), so eval/gating use it."""
+    moves = generate_moves(state)
+    if not moves:
+        return None
+    x = torch.from_numpy(encode(state, max_flats)).unsqueeze(0).to(device)
+    with torch.no_grad():
+        logits, _ = net(x)
+    logits = logits[0].cpu().numpy()
+    idx = np.array([action_space.move_index(m) for m in moves])
+    return moves[int(np.argmax(logits[idx]))]
+
+
 def play_game(net, action_space, sims, device, rng, bot_rng=None,
-              vs_bot=False, bot_level=1, net_player=0, max_plies=400):
+              vs_bot=False, bot_level=1, net_player=0, max_plies=400,
+              net_search=True, open_random=0):
     """Play one game; return (samples, winner). In vs_bot mode samples come only
     from the net's moves and `net_player` is the side the net controls.
+
+    `net_search=False` makes the net move from its bare policy head (no MCTS) --
+    used for eval, which measures deploy-time strength. `open_random` plies are
+    random placements for variety (needed when search/noise is off).
 
     `rng` is a NumPy Generator (MCTS/self-play); `bot_rng` is a random.Random
     used only for the bot's tie-breaking in vs_bot mode."""
@@ -62,19 +82,27 @@ def play_game(net, action_space, sims, device, rng, bot_rng=None,
         if mover is not None and _terminal_winner(state, mover) is not None or \
                 not generate_moves(state):
             break
-        net_turn = (not vs_bot) or state.to_move == net_player
-        if net_turn:
-            counts = mcts.run(state, net, encode, action_space, sims, device,
-                              MAX_FLATS, rng, add_noise=True)
-            if counts.sum() == 0:
-                break
-            samples.append((encode(state, MAX_FLATS),
-                            counts / counts.sum(), state.to_move))
-            move = action_space.moves[_select(counts, ply, rng)]
+        if ply < open_random:                  # random opening plies for variety
+            moves = generate_moves(state)
+            move = moves[int(rng.integers(len(moves)))]
         else:
-            move = bot_move(state, bot_level, bot_rng)
-            if move is None:
-                break
+            net_turn = (not vs_bot) or state.to_move == net_player
+            if net_turn and net_search:
+                counts = mcts.run(state, net, encode, action_space, sims, device,
+                                  MAX_FLATS, rng, add_noise=True)
+                if counts.sum() == 0:
+                    break
+                samples.append((encode(state, MAX_FLATS),
+                                counts / counts.sum(), state.to_move))
+                move = action_space.moves[_select(counts, ply, rng)]
+            elif net_turn:                     # no search: bare policy head
+                move = policy_move(net, state, action_space, device, MAX_FLATS)
+                if move is None:
+                    break
+            else:
+                move = bot_move(state, bot_level, bot_rng)
+                if move is None:
+                    break
         mover = state.to_move
         state = apply_move(state, move)
 

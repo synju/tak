@@ -168,12 +168,14 @@ def _train_steps(net, opt, buffer, device):
 
 
 def _evaluate(net, action_space, device, rng, bot_rng, games):
-    """Win-rate of the net vs the level-1 bot over `games` (no MCTS noise)."""
+    """Win-rate vs the level-1 bot using the net's bare policy head (no search) --
+    the deploy-time form. Random openings give the `games` variety."""
     wins = 0.0
     for g in range(games):
         net_player = g % 2  # alternate colours
-        _, winner = sp.play_game(net, action_space, SIMS, device, rng, bot_rng,
-                                 vs_bot=True, bot_level=1, net_player=net_player)
+        _, winner = sp.play_game(net, action_space, 0, device, rng, bot_rng,
+                                 vs_bot=True, bot_level=1, net_player=net_player,
+                                 net_search=False, open_random=2)
         if winner == net_player:
             wins += 1.0
         elif winner is None:
@@ -332,7 +334,7 @@ def main():
                                       f"(vs level-1 {wr:.0%})")
                         _log(f"  >>> seeded champion (iter {it}, vs level-1 {wr:.0%})")
                     else:
-                        wins, draws = arena.gate(net, champ, action_space, SIMS,
+                        wins, draws = arena.gate(net, champ, action_space,
                                                  device, sp.MAX_FLATS, rng, GATE_GAMES)
                         if wins >= PROMOTE_WINS:
                             n = _count_replacements() + 1
