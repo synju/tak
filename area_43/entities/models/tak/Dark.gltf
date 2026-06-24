@@ -36,7 +36,7 @@
 			],
 			"translation":[
 				0.020937878638505936,
-				0.026020118966698647,
+				0.05761684477329254,
 				0.049466412514448166
 			]
 		},
@@ -56,13 +56,18 @@
 			],
 			"translation":[
 				-0.020937670022249222,
-				0.972796618938446,
+				0.9306399822235107,
 				0.04946647956967354
 			]
 		},
 		{
 			"mesh":3,
-			"name":"Side"
+			"name":"Side",
+			"scale":[
+				0.9864688515663147,
+				0.9864688515663147,
+				0.9864688515663147
+			]
 		}
 	],
 	"materials":[
@@ -258,7 +263,7 @@
 		{
 			"bufferView":12,
 			"componentType":5126,
-			"count":920,
+			"count":916,
 			"max":[
 				1.4840692281723022,
 				0.778026819229126,
@@ -274,19 +279,19 @@
 		{
 			"bufferView":13,
 			"componentType":5126,
-			"count":920,
+			"count":916,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":14,
 			"componentType":5126,
-			"count":920,
+			"count":916,
 			"type":"VEC2"
 		},
 		{
 			"bufferView":15,
 			"componentType":5123,
-			"count":1986,
+			"count":1980,
 			"type":"SCALAR"
 		}
 	],
@@ -365,32 +370,32 @@
 		},
 		{
 			"buffer":0,
-			"byteLength":11040,
+			"byteLength":10992,
 			"byteOffset":360136,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":11040,
-			"byteOffset":371176,
+			"byteLength":10992,
+			"byteOffset":371128,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":7360,
-			"byteOffset":382216,
+			"byteLength":7328,
+			"byteOffset":382120,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":3972,
-			"byteOffset":389576,
+			"byteLength":3960,
+			"byteOffset":389448,
 			"target":34963
 		}
 	],
 	"buffers":[
 		{
-			"byteLength":393548,
+			"byteLength":393408,
 			"uri":"Dark.bin"
 		}
 	]
