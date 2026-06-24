@@ -29,6 +29,7 @@ import torch.nn.functional as F
 from area_43.ai.encoder import ActionSpace, PLANES
 from area_43.ai.net import TakNet
 from area_43.ai import selfplay as sp
+from area_43.ai import arena
 
 # --- config ----------------------------------------------------------------
 SIZE = sp.SIZE
@@ -44,10 +45,14 @@ EVAL_GAMES = 20
 WIN_THRESHOLD = 0.60       # switch bootstrap -> self-play at this win-rate
 SAVE_EVERY = 1             # checkpoint every N iterations
 KEEP_CHECKPOINTS = 2       # keep only the newest N; older ones are pruned on save
+GATE_GAMES = 100           # challenger-vs-champion match length (fires at >=50% vs level-1)
+PROMOTE_WINS = 55          # challenger must win this many of GATE_GAMES to take over
 # next to this file (area_43/models), independent of the current directory
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 PROGRESS = os.path.join(MODELS_DIR, "progress.txt")
-ARCHIVE_DIR = os.path.join(MODELS_DIR, "archive")  # milestone snapshots, never pruned
+ARCHIVE_DIR = os.path.join(MODELS_DIR, "archive")  # champion + counter, never pruned
+CHAMPION = os.path.join(ARCHIVE_DIR, "nn_lvl_1_bot.pt")  # reigning best (overwritten on promotion)
+COUNTER = os.path.join(ARCHIVE_DIR, "counter.txt")       # log of seeds + replacements
 
 
 def _log(msg):
@@ -78,20 +83,33 @@ def _prune(keep):
             pass
 
 
-def _archive(net, it, wr, label):
-    """Save a play-only milestone snapshot into archive/ (never pruned). Holds
-    just the net + config, so it's small and ready to load as an opponent.
-    Skips if this rung was already captured."""
+def _champion_path():
+    """Path to the reigning champion, or None if none has been crowned yet."""
+    return CHAMPION if os.path.exists(CHAMPION) else None
+
+
+def _write_champion(net, it, wr):
+    """Save the current net as the champion (play-only: just net + config)."""
     os.makedirs(ARCHIVE_DIR, exist_ok=True)
-    if glob.glob(os.path.join(ARCHIVE_DIR, f"nn_{label}_*.pt")):
-        return None  # already archived this level
-    path = os.path.join(ARCHIVE_DIR, f"nn_{label}_iter{it}_wr{round(wr * 100)}.pt")
-    tmp = path + ".tmp"
+    tmp = CHAMPION + ".tmp"
     torch.save({"net": net.state_dict(),
                 "config": {"channels": CHANNELS, "blocks": BLOCKS, "size": SIZE},
-                "iteration": it, "win_rate": wr, "label": label}, tmp)
-    os.replace(tmp, path)
-    return path
+                "iteration": it, "win_rate": wr, "label": "lvl_1_bot"}, tmp)
+    os.replace(tmp, CHAMPION)
+
+
+def _count_replacements():
+    """How many times the champion has been replaced (from counter.txt)."""
+    if not os.path.exists(COUNTER):
+        return 0
+    with open(COUNTER) as f:
+        return sum(1 for line in f if "replacement #" in line)
+
+
+def _counter_line(msg):
+    os.makedirs(ARCHIVE_DIR, exist_ok=True)
+    with open(COUNTER, "a") as f:
+        f.write(f"{datetime.now():%Y-%m-%d %H:%M:%S}  {msg}\n")
 
 
 def _save(net, opt, it, phase, buffer):
@@ -306,10 +324,27 @@ def main():
             if args.eval and it % EVAL_EVERY == 0:
                 wr = _evaluate(net, action_space, device, rng, bot_rng, EVAL_GAMES)
                 _log(f"  eval vs level-1: {wr:.0%}")
-                if wr >= 0.50:  # ~matches level-1 -> capture as the level-1 NN rung
-                    apath = _archive(net, it, wr, "lvl_1_bot")
-                    if apath:
-                        _log(f"  >>> milestone: archived {os.path.basename(apath)}")
+                if wr >= 0.50:  # good enough to seed / challenge the champion
+                    champ = _champion_path()
+                    if champ is None:
+                        _write_champion(net, it, wr)
+                        _counter_line(f"seeded champion at iter {it} "
+                                      f"(vs level-1 {wr:.0%})")
+                        _log(f"  >>> seeded champion (iter {it}, vs level-1 {wr:.0%})")
+                    else:
+                        wins, draws = arena.gate(net, champ, action_space, SIMS,
+                                                 device, sp.MAX_FLATS, rng, GATE_GAMES)
+                        if wins >= PROMOTE_WINS:
+                            n = _count_replacements() + 1
+                            _write_champion(net, it, wr)
+                            _counter_line(f"replacement #{n}: challenger won "
+                                          f"{wins}/{GATE_GAMES} (draws {draws}) "
+                                          f"at iter {it}")
+                            _log(f"  >>> NEW CHAMPION #{n}: won {wins}/{GATE_GAMES} "
+                                 f"(draws {draws})")
+                        else:
+                            _log(f"  >>> champion kept: challenger won "
+                                 f"{wins}/{GATE_GAMES} (draws {draws})")
                 if auto_switch and phase == "bootstrap" and wr >= WIN_THRESHOLD:
                     phase = "selfplay"
                     _log(f"  >>> reached {wr:.0%} -- switching to self-play")
