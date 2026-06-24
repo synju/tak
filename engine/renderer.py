@@ -85,8 +85,9 @@ class Renderer:
 		imgs = []
 		for f in faces:
 			img = PNMImage()
-			if not img.read(Filename(f"{cubemap_dir}/{f}.png")):
-				print(f"Renderer: env map face missing: {cubemap_dir}/{f}.png")
+			fn = Filename.fromOsSpecific(f"{cubemap_dir}/{f}.png")
+			if not img.read(fn):
+				print(f"Renderer: env map face NOT found: {fn}")
 				return
 			imgs.append(img)
 
@@ -96,6 +97,7 @@ class Renderer:
 			cube.load(img, i, 0)
 
 		self.pipeline.env_map = simplepbr.EnvMap(cube, blocking_prepare=True)
+		print(f"Renderer: environment map loaded ({cubemap_dir})")
 
 	def _setup_camera(self):
 		"""Setup camera defaults"""

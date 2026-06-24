@@ -161,8 +161,11 @@ class TakScene(Scene):
         )
 
         # Reflect the sky on metallic PBR surfaces (e.g. the stones' gold inlay).
-        self.engine.renderer.set_environment_map(
-            "assets/skydomes/sky_16_2k/sky_16_cubemap_2k")
+        # Absolute path so it resolves regardless of the launch directory.
+        cubemap_dir = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "..", "assets", "skydomes",
+            "sky_16_2k", "sky_16_cubemap_2k"))
+        self.engine.renderer.set_environment_map(cubemap_dir)
 
     def setup_lights(self):
         self.ambient_light = AmbientLight(
