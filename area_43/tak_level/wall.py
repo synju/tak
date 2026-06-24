@@ -61,8 +61,13 @@ class Wall:
 
     def set_highlight(self, on):
         self._highlighted = on
-        if self.outline_np:
-            self.outline_np.setColor(*(Flat.HIGHLIGHT if on else Flat.OUTLINE), 1)
+        if not self.outline_np:
+            return
+        if on:
+            self.outline_np.setColor(*Flat.HIGHLIGHT, 1)
+            self.outline_np.show()
+        else:
+            self.outline_np.hide()
 
     def _create_collision(self):
         if self.body:

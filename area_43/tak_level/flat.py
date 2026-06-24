@@ -19,7 +19,6 @@ class Flat:
     MODEL_SCALE = 0.5                  # stone is 3x3x1 in model units
     MODEL_OFFSET = (0.0, 0.0, -0.25)   # base sits on the box bottom
 
-    OUTLINE = (0.5, 0.5, 0.5, 1.0)    # medium grey edge, idle
     HIGHLIGHT = (1.0, 1.0, 0.0, 1.0)  # yellow when selecting/building a selection
 
     _TEMPLATES = {}  # path -> loaded model, shared by all stones (flat + wall)
@@ -77,8 +76,13 @@ class Flat:
 
     def set_highlight(self, on):
         self._highlighted = on
-        if self.outline_np:
-            self.outline_np.setColor(*(Flat.HIGHLIGHT if on else Flat.OUTLINE), 1)
+        if not self.outline_np:
+            return
+        if on:
+            self.outline_np.setColor(*Flat.HIGHLIGHT, 1)
+            self.outline_np.show()
+        else:
+            self.outline_np.hide()
 
     def _create_collision(self):
         if self.body:
