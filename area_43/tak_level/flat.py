@@ -1,5 +1,7 @@
+import os
+
 from engine.mesh_object import MeshObject
-from engine.geometry import make_box_node_uv, make_wire_box_node
+from engine.geometry import make_wire_box_node
 from panda3d.bullet import BulletBoxShape, BulletRigidBodyNode
 
 
@@ -10,8 +12,30 @@ class Flat:
     HEIGHT = 0.5
     LENGTH = 1.5
 
+    # 3D stone model (Light=white, Dark=black). Tune these to taste.
+    MODEL_DIR = os.path.join(os.path.dirname(__file__), "..",
+                             "entities", "models", "tak")
+    MODEL_SCALE = 0.5                  # stone is 3x3x1 in model units
+    MODEL_OFFSET = (0.0, 0.0, -0.25)   # base sits on the box bottom
+
     OUTLINE = (0.5, 0.5, 0.5, 1.0)    # medium grey edge, idle
     HIGHLIGHT = (1.0, 1.0, 0.0, 1.0)  # yellow when selecting/building a selection
+
+    _TEMPLATES = {}  # path -> loaded model, shared by all stones (flat + wall)
+
+    @classmethod
+    def _model_file(cls, color):
+        return "Light.gltf" if color == cls.WHITE else "Dark.gltf"
+
+    @classmethod
+    def _template(cls, engine, color):
+        """Load each colour's model once; instance it for every stone."""
+        key = cls._model_file(color)
+        tmpl = Flat._TEMPLATES.get(key)
+        if tmpl is None:
+            tmpl = engine.loader.loadModel(os.path.join(cls.MODEL_DIR, key))
+            Flat._TEMPLATES[key] = tmpl
+        return tmpl
 
     def __init__(self, engine, color=WHITE, x=0, y=0, layer_index=0):
         self.engine = engine
@@ -34,12 +58,12 @@ class Flat:
         if self.outline_np:
             self.outline_np.removeNode()
 
-        node = make_box_node_uv(
-            Flat.WIDTH, Flat.HEIGHT, Flat.LENGTH, self.position, "flat",
-        )
-        self.mesh_node = self.mesh.node.attachNewNode(node)
-        from area_43.tak_level.piece_texture import texture_for
-        self.mesh_node.setTexture(texture_for(self.engine, self.color))
+        self.mesh_node = self.mesh.node.attachNewNode("flat_model")
+        Flat._template(self.engine, self.color).instanceTo(self.mesh_node)
+        ox, oy, oz = Flat.MODEL_OFFSET
+        px, py, pz = self.position
+        self.mesh_node.setPos(px + ox, py + oy, pz + oz)
+        self.mesh_node.setScale(Flat.MODEL_SCALE)
 
         outline = make_wire_box_node(
             Flat.WIDTH, Flat.HEIGHT, Flat.LENGTH,

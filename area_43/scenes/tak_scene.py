@@ -4,7 +4,7 @@ import random
 import threading
 
 from direct.showbase.ShowBase import ShowBase
-from panda3d.core import WindowProperties, Point3, Point2, TextNode
+from panda3d.core import WindowProperties, Point3, Point2
 from area_43.cameras.free_flying_camera import FreeFlyingCamera
 from area_43.tak_level.board import Board
 from area_43.tak_level.board_block import BoardBlock
@@ -40,10 +40,6 @@ class TakScene(Scene):
     def __init__(self, engine, turn_time=2.0):
         super().__init__(engine, "tak_scene")
 
-        # Debugging Mode
-        # self.engine.debug_enabled = True
-        self.debug = True
-
         # Disable Grid
         self.engine.scene_handler.grid.hide()
 
@@ -63,7 +59,6 @@ class TakScene(Scene):
 
         # Level
         self.board = None
-        self.board_labels = []
         self.reserves = []
         self.table = None
 
@@ -165,6 +160,10 @@ class TakScene(Scene):
             },
         )
 
+        # Reflect the sky on metallic PBR surfaces (e.g. the stones' gold inlay).
+        self.engine.renderer.set_environment_map(
+            "assets/skydomes/sky_16_2k/sky_16_cubemap_2k")
+
     def setup_lights(self):
         self.ambient_light = AmbientLight(
             self.engine, "ambient", color=(0.3, 0.3, 0.3), light_enabled=True
@@ -206,24 +205,6 @@ class TakScene(Scene):
 
         # Create Board
         self.board = Board(self.engine, size=5)
-
-        # Index Board Blocks - flat labels on each position
-        if self.debug:
-            self.board_labels = []
-            for y in range(5):
-                for x in range(5):
-                    index = y * 5 + x
-                    label_text = chr(ord("A") + index)
-                    text = TextNode(f"board_label_{label_text}")
-                    text.setText(label_text)
-                    text.setTextColor(0, 0, 0, 1)
-                    text_node = base.render.attachNewNode(text)
-                    text_node.setScale(0.5)
-                    wx, wy = BoardBlock.board_to_world(x, y)
-                    text_node.setPos(wx - 0.2, wy - 0.2, 0.3)
-                    text_node.setP(-90)  # Lay flat (facing down toward camera)
-                    text_node.flattenLight()
-                    self.board_labels.append(text_node)
 
         # Create stack handler
         self.stack_handler = StackHandler(self.engine)
@@ -681,9 +662,6 @@ class TakScene(Scene):
         for reserve in self.reserves:
             reserve.destroy()
         self.reserves = []
-        for label in self.board_labels:
-            label.removeNode()
-        self.board_labels = []
         if self.table:
             self.table.destroy()
             self.table = None

@@ -1,5 +1,7 @@
+import os
+
 from engine.mesh_object import MeshObject
-from engine.geometry import make_box_node_uv, make_wire_box_node
+from engine.geometry import make_wire_box_node
 from area_43.tak_level.flat import Flat
 from panda3d.bullet import BulletBoxShape, BulletRigidBodyNode
 
@@ -12,6 +14,11 @@ class Wall:
     WIDTH = Flat.WIDTH    # 1.5
     HEIGHT = Flat.LENGTH  # 1.5 -> now vertical
     LENGTH = Flat.HEIGHT  # 0.5 -> thin depth
+
+    # 3D stone model, stood on its edge. Tune these to taste.
+    MODEL_SCALE = 0.5
+    MODEL_OFFSET = (0.0, 0.0, 0.0)   # nudge to centre on the square
+    MODEL_HPR = (0.0, 90.0, 0.0)     # pitch the stone up onto its edge
 
     BOARD_TOP = 0.25  # board surface height (where a layer-0 piece rests)
 
@@ -37,12 +44,13 @@ class Wall:
         if self.outline_np:
             self.outline_np.removeNode()
 
-        node = make_box_node_uv(
-            Wall.WIDTH, Wall.HEIGHT, Wall.LENGTH, self.position, "wall",
-        )
-        self.mesh_node = self.mesh.node.attachNewNode(node)
-        from area_43.tak_level.piece_texture import texture_for
-        self.mesh_node.setTexture(texture_for(self.engine, self.color))
+        self.mesh_node = self.mesh.node.attachNewNode("wall_model")
+        Flat._template(self.engine, self.color).instanceTo(self.mesh_node)
+        ox, oy, oz = Wall.MODEL_OFFSET
+        px, py, pz = self.position
+        self.mesh_node.setPos(px + ox, py + oy, pz + oz)
+        self.mesh_node.setHpr(*Wall.MODEL_HPR)
+        self.mesh_node.setScale(Wall.MODEL_SCALE)
 
         outline = make_wire_box_node(
             Wall.WIDTH, Wall.HEIGHT, Wall.LENGTH,

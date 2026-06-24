@@ -3,7 +3,7 @@ from panda3d.core import (
 	NodePath, CardMaker, TextNode, WindowProperties,
 	GeomVertexFormat, GeomVertexData, GeomVertexWriter,
 	Geom, GeomLines, GeomTriangles, GeomNode,
-	Vec4, LColor, GraphicsOutput, Texture
+	Vec4, LColor, GraphicsOutput, Texture, Filename, PNMImage
 )
 import simplepbr
 import sys
@@ -74,6 +74,28 @@ class Renderer:
 	def _setup_depth_texture(self):
 		"""Get depth texture from renderer (simplepbr's buffer)"""
 		self._depth_tex = self.engine.renderer.depth_tex
+
+	def set_environment_map(self, cubemap_dir):
+		"""Use a 6-face cube map as the PBR reflection/IBL source.
+
+		Expects px/nx/py/ny/pz/nz .png faces in cubemap_dir. Without this,
+		metallic materials have nothing to reflect and render flat/dark.
+		"""
+		faces = ["px", "nx", "py", "ny", "pz", "nz"]  # +X,-X,+Y,-Y,+Z,-Z
+		imgs = []
+		for f in faces:
+			img = PNMImage()
+			if not img.read(Filename(f"{cubemap_dir}/{f}.png")):
+				print(f"Renderer: env map face missing: {cubemap_dir}/{f}.png")
+				return
+			imgs.append(img)
+
+		cube = Texture("env_cubemap")
+		cube.setupCubeMap(imgs[0].getXSize(), Texture.TUnsignedByte, Texture.FRgb)
+		for i, img in enumerate(imgs):
+			cube.load(img, i, 0)
+
+		self.pipeline.env_map = simplepbr.EnvMap(cube, blocking_prepare=True)
 
 	def _setup_camera(self):
 		"""Setup camera defaults"""
