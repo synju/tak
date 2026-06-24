@@ -1,7 +1,10 @@
+import os
+
 from engine.mesh_object import MeshObject
-from engine.geometry import make_pyramid_node, make_wire_box_node
+from engine.geometry import make_wire_box_node
 from area_43.tak_level.flat import Flat
 from panda3d.bullet import BulletBoxShape, BulletRigidBodyNode
+from panda3d.core import Filename
 
 
 class Capstone:
@@ -12,7 +15,30 @@ class Capstone:
     HEIGHT = 0.9
     LENGTH = 1.0
 
+    # 3D pyramid model. Gold capstone (dark-stone player) -> dark pyramid,
+    # silver capstone (light-stone player) -> light pyramid. Tune to taste.
+    MODEL_DIR = Flat.MODEL_DIR
+    MODEL_SCALE = 0.45                  # pyramid is ~2.2 wide x 1.94 tall in model units
+    MODEL_OFFSET = (0.0, 0.0, -0.45)    # base sits on the box bottom
+
     BOARD_TOP = 0.25  # board surface height (where a layer-0 piece rests)
+
+    _TEMPLATES = {}  # path -> loaded model, shared by all capstones
+
+    @classmethod
+    def _model_file(cls, color):
+        return "light_pyramid.gltf" if color == cls.SILVER else "dark_pyramid.gltf"
+
+    @classmethod
+    def _template(cls, engine, color):
+        """Load each pyramid once; instance it for every capstone."""
+        key = cls._model_file(color)
+        tmpl = Capstone._TEMPLATES.get(key)
+        if tmpl is None:
+            path = os.path.abspath(os.path.join(cls.MODEL_DIR, key))
+            tmpl = engine.loader.loadModel(Filename.fromOsSpecific(path))
+            Capstone._TEMPLATES[key] = tmpl
+        return tmpl
 
     def __init__(self, engine, color=GOLD, x=0, y=0, layer_index=0):
         self.engine = engine
@@ -36,13 +62,14 @@ class Capstone:
         if self.outline_np:
             self.outline_np.removeNode()
 
-        node = make_pyramid_node(
-            Capstone.WIDTH, Capstone.HEIGHT, Capstone.LENGTH,
-            self.color, self.position, "capstone",
-        )
-        self.mesh_node = self.mesh.node.attachNewNode(node)
+        self.mesh_node = self.mesh.node.attachNewNode("capstone_model")
+        Capstone._template(self.engine, self.color).instanceTo(self.mesh_node)
+        ox, oy, oz = Capstone.MODEL_OFFSET
+        px, py, pz = self.position
+        self.mesh_node.setPos(px + ox, py + oy, pz + oz)
+        self.mesh_node.setScale(Capstone.MODEL_SCALE)
 
-        # Pyramid has no grey edge rect; outline only appears (yellow) on highlight.
+        # Outline only appears (yellow) on highlight.
         outline = make_wire_box_node(
             Capstone.WIDTH, Capstone.HEIGHT, Capstone.LENGTH,
             color=Flat.HIGHLIGHT, position=self.position, name="capstone_outline",
