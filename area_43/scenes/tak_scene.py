@@ -1,5 +1,6 @@
 import os
 import queue
+import random
 import threading
 
 from direct.showbase.ShowBase import ShowBase
@@ -34,8 +35,9 @@ NN_DIR = os.path.join(os.path.dirname(__file__), "..", "test_nn")  # one .pt to 
 class TakScene(Scene):
     MENU_SPIN_SPEED = 6.0  # deg/sec the camera drifts around the board on the menu
     BOT_DELAY = 0.6        # seconds the bot "thinks" before moving
+    NN_REPLAY_SECONDS = 5.0  # countdown after a result before the next NN vs NN match
 
-    def __init__(self, engine):
+    def __init__(self, engine, turn_time=3.0):
         super().__init__(engine, "tak_scene")
 
         # Debugging Mode
@@ -92,6 +94,15 @@ class TakScene(Scene):
         self.bot_thread = None   # worker computing the bot's move (off main thread)
         self.bot_queue = None
         self.nn_opponent = None  # set for a PLAY NN game; reuses the bot turn pipeline
+
+        # NN vs NN watch mode
+        self.nn_vs_nn = False
+        self.nn_turn_time = turn_time   # seconds per NN move (CLI --turn-time)
+        self.menu_button = None         # top-left BACK TO MENU button
+        self.nn_result = None           # result + countdown overlay
+        self.nn_countdown_label = None
+        self.replay_pending = False
+        self.replay_timer = 0.0
 
         # Mouse Boolean
         self.right_mouse_down = False
@@ -313,6 +324,7 @@ class TakScene(Scene):
 
         # Update placement handler (orbit mode only; not while the menu is up)
         if (self.placement_handler and self.start_menu is None
+                and not self.nn_vs_nn  # watch mode: no human placement
                 and self.camera_mode == self.camera_orbit_mode):
             self.placement_handler.update(dt)
 
@@ -326,6 +338,16 @@ class TakScene(Scene):
                     self._start_bot_thinking()
             elif self.bot_thread is not None and not self.bot_thread.is_alive():
                 self._finish_bot_move()
+
+        # NN vs NN: after a result, count down, then auto-start the next match.
+        if self.nn_vs_nn and self.game_over and self.replay_pending:
+            self.replay_timer -= dt
+            secs = max(0, int(self.replay_timer) + 1)
+            if self.nn_countdown_label:
+                self.nn_countdown_label["text"] = f"next match in {secs}..."
+            if self.replay_timer <= 0.0:
+                self.replay_pending = False
+                self._restart_nn_match()
 
         # Camera updates - Skip if console is open
         if not self.engine.scene_handler.console.is_open:
@@ -356,6 +378,12 @@ class TakScene(Scene):
         if self.start_menu:
             self.start_menu.destroy()
             self.start_menu = None
+        if self.menu_button:
+            self.menu_button.destroy()
+            self.menu_button = None
+        if self.nn_result:
+            self.nn_result.destroy()
+            self.nn_result = None
         self._destroy_level()
         if self.free_cam:
             self.free_cam.destroy()
@@ -380,7 +408,11 @@ class TakScene(Scene):
         self.current_player = 1 - self.current_player
         self.placement_handler.set_current_player(self.current_player)
 
-        if self.vs_bot:
+        if self.nn_vs_nn:
+            # Both sides are the NN; queue the next move after the turn delay.
+            self.bot_pending = True
+            self.bot_timer = self.nn_turn_time
+        elif self.vs_bot:
             # Camera stays on the human's side; queue the bot if it's its turn.
             if self.current_player == self.bot_player:
                 self.bot_pending = True
@@ -393,8 +425,10 @@ class TakScene(Scene):
         # Snapshot the position on the main thread (reads live pieces), then run
         # the pure search on a worker; build_state copies into plain data.
         state = self.placement_handler.build_state()
-        if self.nn_opponent is not None:
-            think = lambda: self.nn_opponent.choose_move(state)
+        if self.nn_vs_nn:
+            think = lambda: self._nn_vs_nn_move(state)
+        elif self.nn_opponent is not None:
+            think = lambda: self.nn_opponent.policy_move(state)
         else:
             from area_43.tak_level.tak_bot import choose_move
             level = self.bot_level
@@ -434,6 +468,9 @@ class TakScene(Scene):
         else:
             message, bg, fg = "DRAW", (0.2, 0.2, 0.2, 1), white
         self.game_over = True
+        if self.nn_vs_nn:
+            self._show_nn_result(message, bg, fg)  # result + countdown, auto-replays
+            return
         if self.win_panel:
             self.win_panel.destroy()
         self.win_panel = WinPanel(
@@ -449,6 +486,7 @@ class TakScene(Scene):
             [("PLAY", self.show_color_menu),
              ("PLAY BOT", self.show_bot_color_menu),
              ("PLAY NN", self.show_nn_color_menu),
+             ("NN vs NN", self.start_nn_vs_nn),
              ("QUIT", self.engine.quit)],
             credit=True,
         )
@@ -499,6 +537,77 @@ class TakScene(Scene):
         self.vs_bot = True                   # reuse the bot turn pipeline
         self.bot_player = 1 - human_player
         self.nn_opponent = opponent
+
+    def start_nn_vs_nn(self):
+        # Watch the test_nn model play itself, match after match (no search).
+        opponent = load_opponent(NN_DIR)
+        if opponent is None:
+            print(f"[NN vs NN] no .pt model found in {os.path.normpath(NN_DIR)}")
+            self.show_start_menu()
+            return
+        print(f"[NN vs NN] loaded {opponent.name} on {opponent.device}")
+        self.start_game(0)            # fresh board, black first; clears flags
+        self.nn_vs_nn = True
+        self.nn_opponent = opponent
+        self._show_menu_button()
+        self.bot_pending = True       # kick off the first move
+        self.bot_timer = self.nn_turn_time
+
+    def _nn_vs_nn_move(self, state):
+        # First move of each side is a random flat; afterwards the bare policy head.
+        if not state.opening_done[state.to_move]:
+            from area_43.tak_level.tak_rules import generate_moves
+            return random.choice(generate_moves(state))
+        return self.nn_opponent.policy_move(state)
+
+    def _show_nn_result(self, message, bg, fg):
+        from direct.gui.DirectGui import DirectFrame, DirectLabel
+        if self.nn_result:
+            self.nn_result.destroy()
+        self.nn_result = DirectFrame(
+            frameColor=bg, frameSize=(-0.6, 0.6, -0.3, 0.3), pos=(0, 0, 0))
+        DirectLabel(parent=self.nn_result, text=message, text_fg=fg,
+                    text_scale=0.13, frameColor=(0, 0, 0, 0), pos=(0, 0, 0.05))
+        self.nn_countdown_label = DirectLabel(
+            parent=self.nn_result, text="", text_fg=fg, text_scale=0.05,
+            frameColor=(0, 0, 0, 0), pos=(0, 0, -0.12))
+        self.replay_pending = True
+        self.replay_timer = TakScene.NN_REPLAY_SECONDS
+
+    def _restart_nn_match(self):
+        if self.nn_result:
+            self.nn_result.destroy()
+            self.nn_result = None
+        self.nn_countdown_label = None
+        self.restart_game()           # rebuild board + reset turn state (black first)
+        self.bot_pending = True       # kick off the next match's first move
+        self.bot_timer = self.nn_turn_time
+
+    def _show_menu_button(self):
+        from direct.gui.DirectGui import DirectButton
+        from direct.gui import DirectGuiGlobals as DGG
+        if self.menu_button:
+            return
+        self.menu_button = DirectButton(
+            parent=base.a2dTopLeft, text="BACK TO MENU",
+            text_scale=0.045, text_pos=(0, -0.013), text_fg=(1, 1, 1, 1),
+            frameColor=(0.15, 0.15, 0.15, 1), frameSize=(-0.18, 0.18, -0.05, 0.05),
+            relief=DGG.FLAT, pos=(0.22, 0, -0.1), command=self._nn_vs_nn_to_menu)
+
+    def _nn_vs_nn_to_menu(self):
+        self.nn_vs_nn = False
+        self.replay_pending = False
+        self.bot_pending = False
+        self.bot_thread = None        # abandon any in-flight move worker
+        if self.menu_button:
+            self.menu_button.destroy()
+            self.menu_button = None
+        if self.nn_result:
+            self.nn_result.destroy()
+            self.nn_result = None
+        self.nn_countdown_label = None
+        self.restart_game()           # fresh board under the menu
+        self.show_start_menu()
 
     def start_bot_game(self, human_player, level):
         # Human plays human_player; bot takes the other side.

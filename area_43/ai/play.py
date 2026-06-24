@@ -37,6 +37,12 @@ class NNOpponent:
             return None
         return self.action_space.moves[int(counts.argmax())]
 
+    def policy_move(self, state):
+        """Bare policy-head move: one forward pass, no MCTS (instant play)."""
+        from area_43.ai import selfplay as sp
+        return sp.policy_move(self.net, state, self.action_space, self.device,
+                              MAX_FLATS)
+
 
 def load_opponent(folder):
     """Load the .pt model in `folder` (newest wins if several). None if empty."""
