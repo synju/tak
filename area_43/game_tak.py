@@ -5,8 +5,8 @@ from area_43.scenes.tak_scene import TakScene
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description="Tak")
-    ap.add_argument("--turn-time", type=float, default=3.0,
-                    help="seconds each NN waits before moving in NN vs NN (default 3)")
+    ap.add_argument("--turn-time", type=float, default=2.0,
+                    help="seconds each NN waits before moving in NN vs NN (default 2)")
     args = ap.parse_args()
 
     engine = PeachEngine(

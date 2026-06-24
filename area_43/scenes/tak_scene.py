@@ -37,7 +37,7 @@ class TakScene(Scene):
     BOT_DELAY = 0.6        # seconds the bot "thinks" before moving
     NN_REPLAY_SECONDS = 5.0  # countdown after a result before the next NN vs NN match
 
-    def __init__(self, engine, turn_time=3.0):
+    def __init__(self, engine, turn_time=2.0):
         super().__init__(engine, "tak_scene")
 
         # Debugging Mode
@@ -486,7 +486,7 @@ class TakScene(Scene):
             [("PLAY", self.show_color_menu),
              ("PLAY BOT", self.show_bot_color_menu),
              ("PLAY NN", self.show_nn_color_menu),
-             ("NN vs NN", self.start_nn_vs_nn),
+             ("NN vs NN", self.show_nn_vs_nn_menu),
              ("QUIT", self.engine.quit)],
             credit=True,
         )
@@ -538,8 +538,20 @@ class TakScene(Scene):
         self.bot_player = 1 - human_player
         self.nn_opponent = opponent
 
-    def start_nn_vs_nn(self):
+    def show_nn_vs_nn_menu(self):
+        # NN vs NN -> pick how long each NN waits per move, then start.
+        if self.start_menu:
+            self.start_menu.destroy()
+        options = [("0.5 SECONDS", 0.5), ("1 SECOND", 1.0), ("2 SECONDS", 2.0),
+                   ("3 SECONDS", 3.0), ("5 SECONDS", 5.0)]
+        self.start_menu = StartMenu(
+            [(label, lambda t=t: self.start_nn_vs_nn(t)) for label, t in options],
+        )
+
+    def start_nn_vs_nn(self, turn_time=None):
         # Watch the test_nn model play itself, match after match (no search).
+        if turn_time is not None:
+            self.nn_turn_time = turn_time
         opponent = load_opponent(NN_DIR)
         if opponent is None:
             print(f"[NN vs NN] no .pt model found in {os.path.normpath(NN_DIR)}")
@@ -579,7 +591,7 @@ class TakScene(Scene):
             self.nn_result.destroy()
             self.nn_result = None
         self.nn_countdown_label = None
-        self.restart_game()           # rebuild board + reset turn state (black first)
+        self.restart_game(reset_camera=False)  # keep the camera where you left it
         self.bot_pending = True       # kick off the next match's first move
         self.bot_timer = self.nn_turn_time
 
@@ -641,7 +653,7 @@ class TakScene(Scene):
         self.restart_game()
         self.show_start_menu()
 
-    def restart_game(self):
+    def restart_game(self, reset_camera=True):
         if self.win_panel:
             self.win_panel.destroy()
             self.win_panel = None
@@ -652,8 +664,9 @@ class TakScene(Scene):
         self.move_count = 0
         self._destroy_level()
         self.setup_level()
-        self.orbit_cam.reset()
-        self._face_player(self.start_player)
+        if reset_camera:  # NN vs NN keeps wherever you left the camera
+            self.orbit_cam.reset()
+            self._face_player(self.start_player)
 
     def _destroy_level(self):
         if self.board:
