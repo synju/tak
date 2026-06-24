@@ -17,7 +17,7 @@ class Wall:
 
     # 3D stone model, stood on its edge. Tune these to taste.
     MODEL_SCALE = 0.5
-    MODEL_OFFSET = (0.0, 0.0, 0.0)   # nudge to centre on the square
+    MODEL_OFFSET = (0.0, 0.25, 0.0)   # nudge to centre on the square
     MODEL_HPR = (0.0, 90.0, 0.0)     # pitch the stone up onto its edge
 
     BOARD_TOP = 0.25  # board surface height (where a layer-0 piece rests)
