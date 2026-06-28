@@ -46,7 +46,7 @@ EVAL_EVERY = 5             # iterations between win-rate evals vs level-1
 EVAL_GAMES = 20
 WIN_THRESHOLD = 0.60       # switch bootstrap -> self-play at this win-rate
 SAVE_EVERY = 1             # checkpoint every N iterations
-KEEP_CHECKPOINTS = 2       # keep only the newest N; older ones are pruned on save
+KEEP_CHECKPOINTS = 1       # keep only the newest N; older ones are pruned on save
 GATE_GAMES = 100           # challenger-vs-champion match length (fires at >=50% vs level-1)
 PROMOTE_WINS = 55          # challenger must win this many of GATE_GAMES to take over
 # next to this file (area_43/models), independent of the current directory
