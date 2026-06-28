@@ -1,0 +1,2 @@
+2026-06-25 13:41:11  replacement #1: challenger won 80/100 (draws 0) at iter 360
+2026-06-27 13:41:44  replacement #2: challenger won 72/100 (draws 0) at iter 620

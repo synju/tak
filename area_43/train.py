@@ -40,6 +40,8 @@ TRAIN_STEPS = 40           # gradient steps per iteration
 BATCH = 128
 BUFFER = 40_000            # replay buffer capacity (samples)
 LR = 1e-3
+LR_DECAY = 0.9997          # per-iteration LR multiplier (~50% after 2300 iters)
+BOT_MIX = 10               # vs-bot games injected per selfplay iteration
 EVAL_EVERY = 5             # iterations between win-rate evals vs level-1
 EVAL_GAMES = 20
 WIN_THRESHOLD = 0.60       # switch bootstrap -> self-play at this win-rate
@@ -50,7 +52,7 @@ PROMOTE_WINS = 55          # challenger must win this many of GATE_GAMES to take
 # next to this file (area_43/models), independent of the current directory
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 PROGRESS = os.path.join(MODELS_DIR, "progress.txt")
-ARCHIVE_DIR = os.path.join(MODELS_DIR, "archive")  # champion + counter, never pruned
+ARCHIVE_DIR = os.path.join(MODELS_DIR, "champions")  # champion + counter, never pruned
 CHAMPION = os.path.join(ARCHIVE_DIR, "nn_lvl_1_bot.pt")  # reigning best (overwritten on promotion)
 COUNTER = os.path.join(ARCHIVE_DIR, "counter.txt")       # log of seeds + replacements
 
@@ -112,12 +114,13 @@ def _counter_line(msg):
         f.write(f"{datetime.now():%Y-%m-%d %H:%M:%S}  {msg}\n")
 
 
-def _save(net, opt, it, phase, buffer):
+def _save(net, opt, scheduler, it, phase, buffer):
     """Write a new timestamped checkpoint (never overwrites). Returns its path."""
     os.makedirs(MODELS_DIR, exist_ok=True)
     blob = {
         "net": net.state_dict(),
         "opt": opt.state_dict(),
+        "scheduler": scheduler.state_dict(),
         "iteration": it,
         "phase": phase,
         "buffer": pickle.dumps(list(buffer)),
@@ -142,7 +145,8 @@ def _load(path, net, opt):
     np.random.set_state(blob["rng_np"])
     torch.set_rng_state(blob["rng_torch"])
     buffer = deque(pickle.loads(blob["buffer"]), maxlen=BUFFER)
-    return blob["iteration"], blob["phase"], buffer
+    sched_state = blob.get("scheduler")  # None for old checkpoints
+    return blob["iteration"], blob["phase"], buffer, sched_state
 
 
 def _train_steps(net, opt, buffer, device):
@@ -158,7 +162,7 @@ def _train_steps(net, opt, buffer, device):
         logits, v = net(planes)
         p_loss = -(pi * F.log_softmax(logits, dim=1)).sum(1).mean()
         v_loss = F.mse_loss(v, z)
-        loss = p_loss + v_loss
+        loss = p_loss + 2 * v_loss  # upweight value head so MCTS targets improve
         opt.zero_grad()
         loss.backward()
         opt.step()
@@ -212,16 +216,18 @@ def _worker_setup(size, planes, channels, blocks):
 
 def _worker_play_one(args):
     """Play ONE game with the given weights; return its samples."""
-    weights, phase, sims, seed, net_player = args
+    weights, sims, seed, net_player, vs_bot = args
     net, a = _WK["net"], _WK["a"]
     net.load_state_dict(weights)
     rng = np.random.default_rng(seed)
     bot_rng = random.Random(seed)
-    if phase == "bootstrap":
+    if vs_bot:
         samples, _ = sp.play_game(net, a, sims, "cpu", rng, bot_rng,
-                                  vs_bot=True, bot_level=1, net_player=net_player)
+                                  vs_bot=True, bot_level=1, net_player=net_player,
+                                  open_random=2)
     else:
-        samples, _ = sp.play_game(net, a, sims, "cpu", rng, bot_rng)
+        samples, _ = sp.play_game(net, a, sims, "cpu", rng, bot_rng,
+                                  open_random=2)
     return samples
 
 
@@ -229,7 +235,8 @@ def _gen_parallel(executor, net, games, phase, rng):
     """Generate `games` games (one task each) across the pool; tick per game."""
     weights = {k: v.detach().cpu() for k, v in net.state_dict().items()}
     futs = [executor.submit(_worker_play_one,
-                            (weights, phase, SIMS, int(rng.integers(1 << 31)), g % 2))
+                            (weights, SIMS, int(rng.integers(1 << 31)), g % 2,
+                             phase == "bootstrap" or g < BOT_MIX))
             for g in range(games)]
     samples = []
     for fut in cf.as_completed(futs):
@@ -256,6 +263,8 @@ def main():
                     help="worker processes when --parallel True")
     ap.add_argument("--sims", type=int, default=SIMS,
                     help=f"MCTS simulations per move (default {SIMS})")
+    ap.add_argument("--lr", type=float, default=None,
+                    help="override learning rate after loading checkpoint")
     args = ap.parse_args()
     games_per_iter = args.games
     SIMS = args.sims
@@ -264,15 +273,23 @@ def main():
     action_space = ActionSpace(SIZE)
     net = TakNet(PLANES, SIZE, len(action_space), CHANNELS, BLOCKS).to(device)
     opt = torch.optim.Adam(net.parameters(), lr=LR, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=LR_DECAY)
 
     ckpt = _latest_ckpt()
     if ckpt:
-        it, phase, buffer = _load(ckpt, net, opt)
+        it, phase, buffer, sched_state = _load(ckpt, net, opt)
+        if sched_state is not None:
+            scheduler.load_state_dict(sched_state)
         _log(f"resumed from {os.path.basename(ckpt)}: iter {it}, phase {phase}, "
              f"{len(buffer)} samples")
     else:
         it, phase, buffer = 0, "bootstrap", deque(maxlen=BUFFER)
         _log(f"fresh start on {device}, action space {len(action_space)}")
+
+    if args.lr is not None:
+        for pg in opt.param_groups:
+            pg['lr'] = args.lr
+        _log(f"learning rate overridden to {args.lr}")
 
     # --selfplay forces the phase for this run and disables the auto-switch
     auto_switch = args.selfplay is None
@@ -308,18 +325,22 @@ def main():
             else:
                 new = 0
                 for g in range(games_per_iter):
-                    if phase == "bootstrap":
+                    use_bot = phase == "bootstrap" or g < BOT_MIX
+                    if use_bot:
                         samples, _ = sp.play_game(
                             net, action_space, SIMS, device, rng, bot_rng,
-                            vs_bot=True, bot_level=1, net_player=g % 2)
+                            vs_bot=True, bot_level=1, net_player=g % 2,
+                            open_random=2)
                     else:
                         samples, _ = sp.play_game(
-                            net, action_space, SIMS, device, rng, bot_rng)
+                            net, action_space, SIMS, device, rng, bot_rng,
+                            open_random=2)
                     buffer.extend(samples)
                     new += len(samples)
                     print(".", end="", flush=True)  # one dot per finished game
             print()  # end the dots line
             loss = _train_steps(net, opt, buffer, device)
+            scheduler.step()
             _log(f"iter {it} [{phase}]  +{new} samples  buffer {len(buffer)}  "
                  f"loss {loss if loss is None else round(loss, 3)}")
 
@@ -352,14 +373,14 @@ def main():
                     _log(f"  >>> reached {wr:.0%} -- switching to self-play")
 
             if it % SAVE_EVERY == 0:
-                _save(net, opt, it, phase, buffer)
+                _save(net, opt, scheduler, it, phase, buffer)
         # bounded run finished normally
-        path = _save(net, opt, it, phase, buffer)
+        path = _save(net, opt, scheduler, it, phase, buffer)
         _log(f"done: ran {args.iterations} iterations (total iter {it}, "
              f"phase {phase}). saved {os.path.basename(path)}. re-run to continue.")
     except KeyboardInterrupt:
         _log("interrupted -- saving checkpoint...")
-        path = _save(net, opt, it, phase, buffer)
+        path = _save(net, opt, scheduler, it, phase, buffer)
         _log(f"saved {os.path.basename(path)} (iter {it}, phase {phase}). "
              f"re-run to resume.")
     finally:

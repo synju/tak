@@ -16,6 +16,7 @@ class SceneHandler:
 
 		# Renderer reference (set by engine)
 		self.renderer = None
+		self.escape_consumed = False
 
 		# Debug elements
 		self.grid_size = grid_size
@@ -83,6 +84,7 @@ class SceneHandler:
 	# Event handling
 	def handle_input(self, input_handler):
 		"""Handle input for current scene"""
+		self.escape_consumed = False
 		if self.current_scene:
 			self.current_scene.handle_input(input_handler)
 

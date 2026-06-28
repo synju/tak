@@ -29,7 +29,7 @@ from engine.skybox import Skybox
 base: ShowBase
 
 
-NN_DIR = os.path.join(os.path.dirname(__file__), "..", "test_nn")  # one .pt to play vs
+NN_DIR = os.path.join(os.path.dirname(__file__), "..", "models", "test_nn")  # one .pt to play vs
 
 
 class TakScene(Scene):
@@ -260,6 +260,12 @@ class TakScene(Scene):
                 # Switch Camera
                 self.engine.renderer.set_camera(self.orbit_cam)
 
+        # Escape returns to menu
+        if input_handler.is_key_down("escape"):
+            self.scene_handler.escape_consumed = True
+            self.quit_to_menu()
+            return
+
         # Quit
         if input_handler.is_key_down("q"):
             self.engine.quit()
@@ -412,7 +418,11 @@ class TakScene(Scene):
         if self.nn_vs_nn:
             think = lambda: self._nn_vs_nn_move(state)
         elif self.nn_opponent is not None:
-            think = lambda: self.nn_opponent.policy_move(state)
+            if not state.opening_done[state.to_move]:
+                from area_43.tak_level.tak_rules import generate_moves
+                think = lambda: random.choice(generate_moves(state))
+            else:
+                think = lambda: self.nn_opponent.policy_move(state)
         else:
             from area_43.tak_level.tak_bot import choose_move
             level = self.bot_level

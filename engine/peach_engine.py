@@ -89,13 +89,12 @@ class PeachEngine(ShowBase):
 		"""Process input events"""
 		self.input_handler.update()
 
-		# Check for quit
-		if self.input_handler.is_key_down('escape'):
-			self.running = False
-			return
-
-		# Pass input to scene handler
+		# Pass input to scene handler first so scenes can intercept escape
 		self.scene_handler.handle_input(self.input_handler)
+
+		# Quit only if the scene didn't consume escape
+		if self.input_handler.is_key_down('escape') and not self.scene_handler.escape_consumed:
+			self.running = False
 
 	def _update(self, dt):
 		"""Update current scene"""
